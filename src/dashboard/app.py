@@ -116,31 +116,36 @@ def analyze_aspects_smart(text: str) -> dict:
             except Exception:
                 continue
 
-    # 3. Fallback อัจฉริยะ (เมื่อ API ไม่ตอบสนอง)
-    is_q = any(w in t for w in ["ไหม", "มั้ย", "กี่โมง", "เปิด", "ปิด", "เท่าไหร่", "รับบัตรคิว", "สอบถาม"])
+    # 3. Fallback ออฟไลน์ (กรณี API Key ไม่พร้อมหรือ Gemini มีปัญหา)
+    # เพิ่มคำชม/คำติทั่วไป
+    general_pos_words = ["ดีมาก", "ดี", "ยอดเยี่ยม", "ประทับใจ", "สุดยอด", "รวดเร็ว", "สุภาพ", "บริการดี", "ชอบมาก"]
+    general_neg_words = ["แย่", "แย่มาก", "ช้ามาก", "ไม่ดี", "ห่วย", "ชุ่ย", "ไม่ประทับใจ", "ผิดหวัง", "โกรธ", "รอนานมาก"]
+
+    is_gen_pos = any(w in t for w in general_pos_words)
+    is_gen_neg = any(w in t for w in general_neg_words)
+
+    medical_neg_words = ["ผิดพลาด", "วินิจฉัยผิด", "จ่ายยาผิด", "รักษาไม่หาย", "อาการทรุด", "ไม่ตรวจ", "แพ้ยา", "ช็อก", "เกือบตาย", "ฟ้อง", "ทนาย"]
+    doc_neg = any(w in t for w in medical_neg_words) or ("หมอ" in t and any(w in t for w in ["แย่", "ดุ", "ไม่ดี", "ช้า", "ไม่สนใจ"]))
+    doc_pos = any(w in t for w in ["หมอเก่ง", "หมอดี", "หมอพูดจาดี", "หมอใส่ใจ"]) or ("หมอ" in t and is_gen_pos)
     
-    # คำลบเกี่ยวกับการแพทย์ / การรักษา
-    medical_neg_words = ["แพ้ยา", "ช็อก", "เกือบตาย", "รักษาผิด", "จ่ายยาผิด", "วินิจฉัยผิด", "ฟ้อง", "ทนาย", "หมอดุ", "หมอไม่ฟัง", "ไม่ใส่ใจ"]
-    doc_neg = any(w in t for w in medical_neg_words)
-    doc_pos = any(w in t for w in ["หมอดี", "ตรวจละเอียด", "มือเบา", "อธิบายเข้าใจง่าย"])
-
-    nurse_neg = any(w in t for w in ["พยาบาลพูดจาไม่ดี", "ห้วน", "หน้าบึ้ง", "ไม่สนใจ", "ตะคอก"])
-    nurse_pos = any(w in t for w in ["พยาบาลดี", "พูดเพราะ", "สุภาพ", "ใส่ใจ"])
-
-    fac_neg = any(w in t for w in ["ที่จอดรถน้อย", "ที่จอดรถเต็ม", "วนหา", "สกปรก", "เหม็น"])
-    fac_pos = any(w in t for w in ["สะอาด", "กว้าง", "วิวสวย", "สะดวกสบาย"])
-
-    price_neg = any(w in t for w in ["แพง", "ค่ายาแรง", "รอนาน", "คิวยาว", "ช้า", "เข้าค่าย", "ตรวจบ่าย"])
-    price_pos = any(w in t for w in ["ไม่แพง", "ราคาถูก", "รวดเร็ว"])
+    nurse_neg = any(w in t for w in ["พยาบาลดุ", "พยาบาลชักสีหน้า", "พยาบาลพูดจาแย่", "เจ้าหน้าที่ดุ", "จนท.พูดแย่"])
+    nurse_pos = any(w in t for w in ["พยาบาลดี", "พยาบาลน่ารัก", "พยาบาลบริการดี", "เจ้าหน้าที่บริการดี"])
+    
+    fac_neg = any(w in t for w in ["สกปรก", "ห้องน้ำเหม็น", "ที่จอดรถเต็ม", "ไม่มีที่จอด", "แอร์ร้อน"])
+    fac_pos = any(w in t for w in ["สะอาด", "สะดวกสบาย", "ที่จอดรถเยอะ", "ห้องพักดี"])
+    
+    price_neg = any(w in t for w in ["แพง", "แพงมาก", "เกินจริง", "รอนาน", "คิวช้า", "คิวยาว", "รอเป็นชั่วโมง"])
+    price_pos = any(w in t for w in ["ราคาเหมาะสม", "รอไม่นาน", "เร็วดี"])
 
     doc_res = "neg" if doc_neg else "pos" if doc_pos else "not_mentioned"
     nurse_res = "neg" if nurse_neg else "pos" if nurse_pos else "not_mentioned"
     fac_res = "neg" if fac_neg else "pos" if fac_pos else "not_mentioned"
     price_res = "neg" if price_neg else "pos" if price_pos else "not_mentioned"
 
-    if any(r == "neg" for r in [doc_res, nurse_res, fac_res, price_res]):
+    # ประเมินภาพรวม: ตรวจทั้งรายแผนกและคำทั่วไป
+    if any(r == "neg" for r in [doc_res, nurse_res, fac_res, price_res]) or is_gen_neg:
         overall_sent = "neg"
-    elif any(r == "pos" for r in [doc_res, nurse_res, fac_res, price_res]):
+    elif any(r == "pos" for r in [doc_res, nurse_res, fac_res, price_res]) or is_gen_pos:
         overall_sent = "pos"
     elif is_q:
         overall_sent = "neu"
