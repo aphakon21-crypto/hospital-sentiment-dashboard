@@ -1,0 +1,10 @@
+streamlit
+pandas
+plotly
+altair
+gspread
+oauth2client
+requests
+pythainlp
+scikit-learn
+joblib

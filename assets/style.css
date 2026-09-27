@@ -1,0 +1,318 @@
+@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;500;600;700;800&display=swap');
+
+h1, h2, h3, h4, h5, h6, .hero h1 {
+    font-family: 'Prompt', sans-serif !important;
+    letter-spacing: -0.5px; /* บีบช่องไฟนิดหน่อยให้ตัวอักษรดูแน่นและพรีเมียมขึ้น */
+}
+
+/* ===== PREMIUM CLEAN THEME (สไตล์องค์กร / โรงพยาบาล) ===== */
+:root {
+  --brand: #005b9f;      /* สีหลัก: น้ำเงินพรีเมียม */
+  --brand-2: #0284c7;    /* สีรอง: ฟ้าสว่าง */
+  --bg: #f4f7f9;         /* สีพื้นหลังเว็บไซต์: เทาอ่อนสะอาดตา */  
+  --panel: #ffffff;      /* สีพื้นหลังการ์ด: ขาวล้วน */
+  --text-main: #334155;  /* สีตัวอักษร: เทาเข้ม (อ่านง่ายกว่าสีดำสนิท) */
+  --muted: #64748b;
+  --radius: 12px;
+}
+
+html, body, [class^="css"] {
+  font-family: "Inter", "Prompt", system-ui, -apple-system, sans-serif;
+  color: var(--text-main);
+}
+
+/* พื้นหลังของแอปพลิเคชัน Streamlit */
+.stApp {
+    background-color: var(--bg);
+}
+
+/* ซ่อน Header ขอบบนสุดของ Streamlit ให้ดูเนียนตา */
+header[data-testid="stHeader"] {
+    background-color: transparent !important;
+}
+header[data-testid="stHeader"] * {
+    display: none !important;
+}
+.block-container {
+    padding-top: 1rem !important;
+}
+
+/* ===== NAVBAR ===== */
+.navbar {
+  position: sticky; top:0; z-index:1000;
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px 30px; margin:-1rem -1rem 1.2rem -1rem;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+}
+.brand { display:flex; align-items:center; gap:10px; font-weight:800; font-size:18px; color: #0f172a; }
+.brand .dot { width:12px; height:12px; border-radius:99px; background:var(--brand); }
+.nav-actions a { color:var(--muted); text-decoration:none; margin-left:20px; font-weight:600; transition: color 0.2s; }
+.nav-actions a:hover { color:var(--brand); }
+
+/* ===== HERO HEADER ===== */
+.hero {
+  margin:0 0 20px 0; padding:40px 28px;
+  border-radius:var(--radius);
+  background: #ffffff;
+  border:1px solid rgba(0,0,0,0.04);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.02);
+  text-align:center;
+}
+.hero h1 { margin:0; font-weight:800; font-size:32px; color: #0f172a; }
+.hero p { color:var(--muted); margin-top:8px; font-size:15px; }
+
+/* ===== PREMIUM CARD ===== */
+.card, .premium-card {
+    background: #ffffff;
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+    margin-bottom: 20px;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.card:hover, .premium-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 25px rgba(0, 91, 159, 0.08); /* เรืองแสงสีน้ำเงินอ่อนๆ เวลาเอาเมาส์ชี้ */
+}
+
+/* ===== BUTTONS ===== */
+.stButton>button {
+    background: #ffffff !important;
+    color: var(--brand) !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    padding: 0.5rem 1rem !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+}
+.stButton>button:hover {
+    border-color: var(--brand) !important;
+    background: #f0f9ff !important;
+    transform: translateY(-1px);
+}
+/* ปุ่มหลัก (Primary Button) */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, var(--brand-2), var(--brand)) !important;
+    color: white !important;
+    border: none !important;
+    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25) !important;
+}
+.stButton > button[kind="primary"]:hover {
+    background: linear-gradient(135deg, #0369a1, #004b87) !important;
+    box-shadow: 0 6px 16px rgba(2, 132, 199, 0.35) !important;
+}
+
+/* ===== PILL (Result Tags) ===== */
+.pill {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 16px; border-radius:999px; font-weight:700;
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+  color: var(--text-main);
+}
+.pill .dot { width:10px; height:10px; border-radius:999px; display:inline-block; }
+.pill.pos .dot { background:#10b981 } /* เขียว */
+.pill.neu .dot { background:#94a3b8 } /* เทา */
+.pill.neg .dot { background:#ef4444 } /* แดง */
+
+/* ===== FILE UPLOADER (สไตล์มินิมอล) ===== */
+div[data-testid="stFileUploadDropzone"] {
+    background-color: #f8fafc !important;
+    border: 2px dashed #cbd5e1 !important;
+    border-radius: 12px !important;
+    padding: 20px !important;
+    transition: all 0.2s ease;
+}
+div[data-testid="stFileUploadDropzone"]:hover {
+    border-color: var(--brand) !important;
+    background-color: #f0f9ff !important;
+}
+
+/* ===== TEXT INPUT & TEXT AREA ===== */
+.stTextInput>div>div>input, .stTextArea>div>div>textarea {
+    background-color: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    color: var(--text-main) !important;
+}
+.stTextInput>div>div>input:focus, .stTextArea>div>div>textarea:focus {
+    border-color: var(--brand) !important;
+    box-shadow: 0 0 0 2px rgba(0, 91, 159, 0.15) !important;
+}
+
+/* ===== LOGIN PAGE (ปรับเป็นโทนสว่าง) ===== */
+.login-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.login-card {
+  width: 100%;
+  max-width: 900px;
+  min-height: 500px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #ffffff;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 15px 35px rgba(0,0,0,.05);
+}
+.login-left {
+  background: linear-gradient(135deg, var(--brand-2), var(--brand));
+  color: #ffffff;
+  padding: 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.login-left h1 { font-size: 36px; font-weight: 800; margin-bottom: 16px; }
+.login-left p { font-size: 15px; line-height: 1.6; opacity: .9; }
+.login-right {
+  padding: 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.login-title { font-size: 26px; font-weight: 800; margin-bottom: 8px; color: #0f172a; }
+.login-sub { font-size: 14px; color: var(--muted); margin-bottom: 24px; }
+/* ===== LOGO PAGE SLIDE / PROCESS FLOW CSS ===== */
+.slider-title {
+    text-align: center;
+    margin-bottom: 30px;
+}
+.slider-title h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 5px;
+}
+.slider-title p {
+    font-size: 14px;
+    color: #64748b;
+}
+
+.logo-slider-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-top: 10px;
+    margin-bottom: 40px;
+}
+
+.logo-slide-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    position: relative;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* เอฟเฟกต์ยกตัวและความสว่างเมื่อเมาส์ชี้ */
+.logo-slide-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 24px rgba(2, 132, 199, 0.08);
+    border-color: #cbd5e1;
+}
+
+/* จัดรูปแบบวงกลมใส่ไอคอน/โลโก้ */
+.logo-slide-card .icon-wrapper {
+    width: 50px;
+    height: 50px;
+    border-radius: 50px;
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+}
+
+.logo-slide-card h4 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 0 0 8px 0 !important;
+}
+
+.logo-slide-card p {
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.5;
+    margin: 0;
+    margin-bottom: 15px;
+}
+
+/* ป้ายบอกลำดับขั้นตอนขนาดเล็กด้านล่างการ์ด */
+.logo-slide-card .step-badge {
+    margin-top: auto;
+    font-size: 11px;
+    font-weight: 600;
+    background: #f1f5f9;
+    color: #475569;
+    padding: 3px 10px;
+    border-radius: 20px;
+}
+
+/* ลบเส้นใต้ลิงก์และทำให้ลิงก์ครอบคลุมทั้งการ์ด */
+.logo-slide-link {
+    text-decoration: none !important;
+    color: inherit !important;
+}
+
+/* เพิ่มลูกเล่นเวลา Hover */
+.logo-slide-card {
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    cursor: pointer;
+    border: 2px solid transparent !important;
+}
+
+.logo-slide-card:hover {
+    transform: scale(1.05) !important; /* ขยายตัวเล็กน้อย */
+    border: 2px solid #0284c7 !important; /* มีเส้นขอบสีฟ้าล้อมรอบ */
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1) !important;
+}
+
+.icon-wrapper {
+    transition: transform 0.3s ease;
+}
+
+.logo-slide-card:hover .icon-wrapper {
+    transform: rotate(10deg) scale(1.1); /* ไอคอนเอียงและขยายเล็กน้อย */
+}
+
+.logo-slide-card {
+    display: flex; /* ใช้ Flexbox */
+    flex-direction: column; /* เรียงของในแนวตั้ง */
+    align-items: center; /* จัดให้อยู่กึ่งกลางในแนวนอน */
+    text-align: center; /* จัดให้ตัวอักษรอยู่ตรงกลาง */
+    justify-content: flex-start; /* เริ่มต้นจากด้านบน */
+    padding: 20px;
+    height: 100%;
+    border-radius: 12px;
+    background-color: white;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.icon-wrapper {
+    display: flex;
+    justify-content: center; /* จัดไอคอนให้อยู่ตรงกลางของ wrapper */
+    align-items: center;
+    width: 60px; /* กำหนดขนาดไอคอนให้คงที่ */
+    height: 60px;
+    border-radius: 50%;
+    margin-bottom: 15px; /* เว้นระยะห่างจากชื่อแผนก */
+    font-size: 24px;
+}
