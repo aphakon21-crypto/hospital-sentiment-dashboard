@@ -629,31 +629,42 @@ def inject_custom_css():
     .arrow-right { right: 52px; }
 
     /* แท็บเมนูหลัก */
-    /* --- สไตล์แถบ Tabs ทั้งหมด --- */
-    div[data-testid="stTabs"] div[role="tablist"] {
+    /* ========================================================= */
+    /* จัดการ TABS ทั้งหมด: ลบขีดแดงทิ้ง 100% + กล่องปุ่มมนสีฟ้า */
+    /* ========================================================= */
+    /* 1. พื้นหลังคอนเทนเนอร์แถบแท็บ */
+    div[data-testid="stTabs"] [role="tablist"] {
         background-color: #070d1f !important;
         border-radius: 14px !important;
-        padding: 5px !important;
+        padding: 6px !important;
         gap: 6px !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        margin-bottom: 20px !important;
+        margin-bottom: 22px !important;
     }
 
-    /* ปิดเส้นใต้สีแดง/ส้ม และขอบเส้นแบ่งเดิมของ Streamlit ทั้งหมด */
-    div[data-testid="stTabs"] div[data-baseweb="tab-highlight"],
-    div[data-testid="stTabs"] div[data-baseweb="tab-border"],
-    div[data-testid="stTabs"] div[role="tablist"] > div:last-child {
+    /* 2. ลบขีดแดง/ส้ม และเส้นใต้ทุกรูปแบบของ Streamlit ทิ้งถาวร */
+    div[data-testid="stTabs"] [role="tablist"] > div,
+    div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+    div[data-testid="stTabs"] [data-baseweb="tab-border"] {
         display: none !important;
-        height: 0px !important;
-        background-color: transparent !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        visibility: hidden !important;
     }
 
-    /* ปุ่มแท็บสถานะปกติ */
+    div[data-testid="stTabs"] button[role="tab"]::after,
+    div[data-testid="stTabs"] button[role="tab"]::before {
+        display: none !important;
+        content: "" !important;
+    }
+
+    /* 3. สไตล์ปุ่มแท็บสถานะปกติ */
     div[data-testid="stTabs"] button[role="tab"] {
         border-radius: 10px !important;
         padding: 8px 18px !important;
         border: none !important;
         background-color: transparent !important;
+        box-shadow: none !important;
         transition: all 0.2s ease !important;
     }
 
@@ -661,13 +672,14 @@ def inject_custom_css():
     div[data-testid="stTabs"] button[role="tab"] span {
         color: #94a3b8 !important;
         font-weight: 600 !important;
-        font-size: 14.5px !important;
+        font-size: 14px !important;
     }
 
-    /* ปุ่มแท็บเมื่อถูกเลือก (Active Tab) -> กล่องปุ่มมนสีฟ้า */
+    /* 4. เมื่อแท็บถูกเลือก (Active) -> กล่องปุ่มมนสีฟ้าสดใส */
     div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
         background-color: #0284c7 !important;
-        box-shadow: 0 4px 12px rgba(2, 132, 199, 0.45) !important;
+        box-shadow: 0 4px 14px rgba(2, 132, 199, 0.45) !important;
+        border: none !important;
     }
 
     div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p,
@@ -675,7 +687,6 @@ def inject_custom_css():
         color: #ffffff !important;
         font-weight: 700 !important;
     }
-
     /* กล่องการ์ดเนื้อหา */
     .premium-card {
         background: #0f172a !important;
@@ -1216,8 +1227,17 @@ def render_reference_banner():
     """, unsafe_allow_html=True)
 
 # ============================== BANNER ประจำแต่ละแท็บหน้า ==============================
+@st.cache_data
+def load_cached_banner(filename: str) -> str:
+    """โหลดและแคชรูปแบนเนอร์ เพื่อไม่ให้อ่านไฟล์ซ้ำจนเว็บหน่วง"""
+    for base in [ROOT / "assets", BASE_DIR / "assets", Path("assets")]:
+        b_path = base / filename
+        if b_path.exists():
+            return base64.b64encode(b_path.read_bytes()).decode("utf-8")
+    return ""
+
 def banner(page_name: str):
-    """ฟังก์ชันแสดง Banner เฉพาะของแต่ละหน้าที่สลับตามหัวข้อที่เลือก"""
+    """ฟังก์ชันแสดงแบนเนอร์แบบความเร็วสูง"""
     banner_map = {
         "analyze": "banner_analyze.png",
         "summary": "banner_summary.png",
@@ -1225,31 +1245,25 @@ def banner(page_name: str):
         "profile": "banner_profile.png",
     }
     filename = banner_map.get(page_name, "banner.png")
-    banner_path = ROOT / "assets" / filename
-    if not banner_path.exists():
-        banner_path = BASE_DIR / "assets" / filename
-
-    if not banner_path.exists():
-        return
-
-    encoded = base64.b64encode(banner_path.read_bytes()).decode()
-    st.markdown(
-        f"""
-        <div style="margin-bottom: 24px; text-align: center;">
-            <img src="data:image/png;base64,{encoded}"
-                 style="
-                    width: 100%;
-                    max-height: 260px;
-                    object-fit: cover;
-                    border-radius: 16px;
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-                 ">
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
+    encoded = load_cached_banner(filename)
+    
+    if encoded:
+        st.markdown(
+            f"""
+            <div style="margin-bottom: 20px; text-align: center;">
+                <img src="data:image/png;base64,{encoded}" 
+                     style="
+                        width: 100%;
+                        max-height: 250px;
+                        object-fit: cover;
+                        border-radius: 16px;
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+                     ">
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     render_critical_incident_banner()
 
 # ============================== PAGES ==============================
