@@ -1764,7 +1764,11 @@ def render_aspect_analytics_section():
                 score = 3.5
             scores_matrix[d].append(score)
 
-    tab_radar, tab_heatmap = st.tabs(["🕸️ Radar Chart (เจาะลึกรายแผนก)", "🔥 Heatmap (เปรียบเทียบรวมทุกแผนก)"])
+    # ------------------ สร้าง TABS สำหรับ 2 หน้าชาร์ต ------------------
+    tab_radar, tab_heatmap = st.tabs([
+        "🕸️ Radar Chart (เจาะลึกรายแผนก)", 
+        "🗺️ Heatmap (เปรียบเทียบทุกแผนก)"
+    ])
 
     # ------------------ แท็บ 1: RADAR CHART ------------------
     with tab_radar:
@@ -1773,10 +1777,10 @@ def render_aspect_analytics_section():
             selected_radar_dept = st.selectbox(
                 "เลือกแผนกที่ต้องการดูจุดเด่น-จุดด้อย:",
                 all_departments,
-                index=1
+                index=0,
+                key="select_radar_dept_box"
             )
             dept_scores = scores_matrix[selected_radar_dept]
-
             st.markdown(f"**คะแนนมิติบริการ ({selected_radar_dept}):**")
             for lbl, sc in zip(aspect_labels, dept_scores):
                 color = "#4ade80" if sc >= 3.8 else "#facc15" if sc >= 3.0 else "#f87171"
@@ -1786,7 +1790,6 @@ def render_aspect_analytics_section():
             min_idx = dept_scores.index(min_score)
             max_score = max(dept_scores)
             max_idx = dept_scores.index(max_score)
-
             st.markdown("---")
             if min_score < 3.2:
                 st.warning(f"⚠️ จุดที่ควรปรับปรุงเร่งด่วน: **{aspect_labels[min_idx]}**")
@@ -1807,7 +1810,6 @@ def render_aspect_analytics_section():
                 marker=dict(size=7, color='#0284c7'),
                 name=selected_radar_dept
             ))
-
             fig_radar.update_layout(
                 polar=dict(
                     radialaxis=dict(
@@ -1837,40 +1839,6 @@ def render_aspect_analytics_section():
     # ------------------ แท็บ 2: HEATMAP ------------------
     with tab_heatmap:
         z_data = [scores_matrix[d] for d in all_departments]
-
-        fig_heat = px.imshow(
-            z_data,
-            x=aspect_labels,
-            y=all_departments,
-            color_continuous_scale=[
-                [0.0, "#ef4444"],
-                [0.5, "#eab308"],
-                [1.0, "#22c55e"]
-            ],
-            range_color=[1.0, 5.0],
-            text_auto=".1f",
-            aspect="auto"
-        )
-
-        fig_heat.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#f8fafc"),
-            margin=dict(l=20, r=20, t=25, b=25),
-            height=430,
-            coloraxis_colorbar=dict(
-                title="คะแนนประเมิน",
-                tickvals=[1, 2, 3, 4, 5],
-                ticktext=["1.0", "2.0", "3.0", "4.0", "5.0"]
-            )
-        )
-        fig_heat.update_xaxes(side="top")
-        st.plotly_chart(fig_heat, use_container_width=True)
-
-    # ------------------ แท็บ 2: HEATMAP ------------------
-    with tab_heatmap:
-        z_data = [scores_matrix[d] for d in all_departments]
-
         fig_heat = px.imshow(
             z_data,
             x=aspect_labels,
@@ -1884,7 +1852,6 @@ def render_aspect_analytics_section():
             text_auto=".1f",
             aspect="auto"
         )
-
         fig_heat.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
@@ -1892,7 +1859,7 @@ def render_aspect_analytics_section():
             margin=dict(l=20, r=20, t=25, b=25),
             height=430,
             coloraxis_colorbar=dict(
-                title="คะแนนประเมิน",
+                title="ระดับคะแนน",
                 tickvals=[1, 2, 3, 4, 5],
                 ticktext=["1.0", "2.0", "3.0", "4.0", "5.0"]
             )
