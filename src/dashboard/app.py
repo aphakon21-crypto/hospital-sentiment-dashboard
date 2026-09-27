@@ -629,40 +629,49 @@ def inject_custom_css():
     .arrow-right { right: 52px; }
 
     /* แท็บเมนูหลัก */
-    /* จัดการแถบแท็บทั้งหมด (ทั้งแท็บหน้าและแท็บย่อย) */
-    [data-testid="stTabs"] [data-baseweb="tab-list"] {
+    /* --- สไตล์แถบ Tabs ทั้งหมด --- */
+    div[data-testid="stTabs"] div[role="tablist"] {
         background-color: #070d1f !important;
-        border-radius: 16px !important;
-        padding: 6px !important;
-        gap: 8px !important;
+        border-radius: 14px !important;
+        padding: 5px !important;
+        gap: 6px !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        margin-bottom: 22px !important;
+        margin-bottom: 20px !important;
     }
 
-    /* ซ่อนขีดเส้นใต้สีแดงดีฟอลต์ */
-    [data-testid="stTabs"] [data-baseweb="tab-highlight"],
-    [data-testid="stTabs"] [data-baseweb="tab-border"] {
+    /* ปิดเส้นใต้สีแดง/ส้ม และขอบเส้นแบ่งเดิมของ Streamlit ทั้งหมด */
+    div[data-testid="stTabs"] div[data-baseweb="tab-highlight"],
+    div[data-testid="stTabs"] div[data-baseweb="tab-border"],
+    div[data-testid="stTabs"] div[role="tablist"] > div:last-child {
         display: none !important;
+        height: 0px !important;
+        background-color: transparent !important;
     }
 
-    /* สไตล์ปุ่มแท็บทั่วไป */
-    [data-testid="stTabs"] [data-baseweb="tab"] {
-        color: #94a3b8 !important;
-        border-radius: 12px !important;
-        padding: 9px 20px !important;
-        font-weight: 600 !important;
+    /* ปุ่มแท็บสถานะปกติ */
+    div[data-testid="stTabs"] button[role="tab"] {
+        border-radius: 10px !important;
+        padding: 8px 18px !important;
         border: none !important;
         background-color: transparent !important;
         transition: all 0.2s ease !important;
     }
 
-    /* เมื่อแท็บถูกเลือก (Active Tab) -> กล่องปุ่มมนสีฟ้า */
-    [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
-        background-color: #0284c7 !important;
-        color: #ffffff !important;
-        box-shadow: 0 4px 14px rgba(2, 132, 199, 0.45) !important;
+    div[data-testid="stTabs"] button[role="tab"] p,
+    div[data-testid="stTabs"] button[role="tab"] span {
+        color: #94a3b8 !important;
+        font-weight: 600 !important;
+        font-size: 14.5px !important;
     }
-    [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] p {
+
+    /* ปุ่มแท็บเมื่อถูกเลือก (Active Tab) -> กล่องปุ่มมนสีฟ้า */
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        background-color: #0284c7 !important;
+        box-shadow: 0 4px 12px rgba(2, 132, 199, 0.45) !important;
+    }
+
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p,
+    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] span {
         color: #ffffff !important;
         font-weight: 700 !important;
     }
@@ -2547,71 +2556,52 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
     }
 
 
-# 1. แคชไฟล์ GIF เพื่อให้เปิด Pop-up ได้ไว ไม่หน่วง
-@st.cache_data
-def get_cached_rabbit_gif():
-    gif_path = Path("assets/rabbit-working.gif")
-    if gif_path.exists():
-        with open(gif_path, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
-    return ""
-
-# 2. ฟังก์ชัน Pop-up โทนสีขาวสว่าง ตัวหนังสือชัดเจนแบบเวอร์ชันเดิม
 @st.dialog("📄 เครื่องมือแปลงไฟล์ PDF ร้องเรียนเป็น CSV (Batch PDF Ingestion)")
 def open_pdf_batch_converter_dialog():
     st.markdown("""
         <style>
-            /* บังคับพื้นหลังของกล่อง Pop-up ให้เป็นการ์ดสีขาวแบบเวอร์ชันเดิม */
             div[data-testid="stDialog"] > div {
                 background-color: #ffffff !important;
-                border-radius: 24px !important;
+                border-radius: 20px !important;
                 border: 1px solid rgba(226, 232, 240, 0.9) !important;
-                box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45) !important;
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45) !important;
                 padding: 10px 15px !important;
             }
-            /* สีหัวข้อ Pop-up ให้เป็นสีเข้มชัดเจน */
             div[data-testid="stDialog"] h2, 
             div[data-testid="stDialog"] [data-testid="stDialogTitle"] {
                 color: #0f172a !important;
                 font-weight: 800 !important;
             }
-            /* สีข้อความคำอธิบายและ label ให้อ่านง่าย */
             div[data-testid="stDialog"] p,
             div[data-testid="stDialog"] label,
             div[data-testid="stDialog"] span {
                 color: #334155 !important;
                 font-weight: 500 !important;
             }
-            /* กรอบ Dropzone อัปโหลดไฟล์ */
             div[data-testid="stDialog"] [data-testid="stFileUploader"] section {
                 background-color: #f8fafc !important;
                 border: 2px dashed #38bdf8 !important;
             }
-            /* ข้อความบนปุ่มยังคงเป็นสีขาว */
             div[data-testid="stDialog"] button p,
             div[data-testid="stDialog"] button span {
                 color: #ffffff !important;
                 font-weight: 700 !important;
             }
-            /* กากบาทปิด Pop-up */
             div[data-testid="stDialog"] button[aria-label="Close"] svg {
                 fill: #0f172a !important;
             }
         </style>
     """, unsafe_allow_html=True)
-    
-    # โหลด GIF ผ่าน Cache ทันทีในเสี้ยววินาที
-    encoded_gif = get_cached_rabbit_gif()
-    if encoded_gif:
-        st.markdown(
-            f'''
-            <div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: -10px 0 10px 0;">
-                <img src="data:image/gif;base64,{encoded_gif}" 
-                     style="width: 190px; height: auto; object-fit: contain; background: transparent; border: none;" />
-            </div>
-            ''',
-            unsafe_allow_html=True
-        )
+
+    # แสดงผลรูปภาพโดยตรงผ่าน Streamlit image engine แทนการ encode base64 ก้อนใหญ่
+    rabbit_img_path = Path("assets/rabbit-working.gif")
+    if not rabbit_img_path.exists():
+        rabbit_img_path = Path("assets/rabbit.png")
+
+    if rabbit_img_path.exists():
+        _, img_col, _ = st.columns([1, 1.2, 1])
+        with img_col:
+            st.image(str(rabbit_img_path), use_container_width=True)
 
     st.write("อัปโหลดไฟล์ PDF รายงานการร้องเรียนของคนไข้พร้อมกันหลายไฟล์ (สามารถลากไฟล์ทั้งโฟลเดอร์มาวางได้):")
 
