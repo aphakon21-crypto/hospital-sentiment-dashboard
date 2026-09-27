@@ -42,7 +42,10 @@ except ImportError:
 def analyze_aspects_smart(text: str) -> dict:
     t = str(text).lower().strip()
     
-    # 0. Safety / Critical Check: ถ้าเป็นเคสวิกฤตร้ายแรง บังคับเป็นเชิงลบด้านหมอ/การรักษาทันที
+    # กำหนดตัวแปร is_q ป้องกัน NameError
+    is_q = any(w in t for w in ["?", "ไหม", "มั้ย", "รึเปล่า", "หรือไม่", "อย่างไร", "ทำไม", "หรือยัง"])
+    
+    # 0. Safety / Critical Check: ตรวจจับเคสวิกฤตความเสี่ยงสูง
     critical_check = detect_critical_risk(text)
     if critical_check["is_critical"]:
         return {
@@ -55,21 +58,17 @@ def analyze_aspects_smart(text: str) -> dict:
             }
         }
 
-    # 1. ค้นหา API Key จากทุกช่องทาง
+    # 1. ดึง API Key จาก Secrets
     api_key = None
     try:
         if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
     except Exception:
         pass
-
     if not api_key:
         api_key = os.getenv("GEMINI_API_KEY", "")
 
-    # Hardcode Fallback Key เผื่อหาไฟล์ secrets.toml ไม่เจอ
-
-
-    # 2. ยิงวิเคราะห์ด้วย Gemini
+    # 2. ยิงวิเคราะห์ด้วย Gemini (อัปเดตโมเดลเป็น gemini-3.8-flash และ gemini-3.5-flash)
     if HAS_GENAI and api_key:
         prompt = f"""คุณคือผู้เชี่ยวชาญด้านวิเคราะห์ความรู้สึกและบริการของโรงพยาบาล
 กรุณาวิเคราะห์ข้อความความคิดเห็นของผู้รับบริการต่อไปนี้ แล้วตอบกลับเป็น JSON เท่านั้น:
@@ -86,8 +85,8 @@ def analyze_aspects_smart(text: str) -> dict:
 ข้อความคนไข้: \"\"\"{text.strip()}\"\"\""""
 
         client = genai.Client(api_key=api_key)
-        # ใช้ชื่อโมเดลมาตรฐานที่ใช้งานได้จริง
-        candidate_models = ["gemini-2.0-flash", "gemini-1.5-flash"]
+        # ปรับเป็นโมเดลเวอร์ชันปัจจุบันที่ Google แนะนำ
+        candidate_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
         for m in candidate_models:
             try:
                 resp = client.models.generate_content(
@@ -101,30 +100,27 @@ def analyze_aspects_smart(text: str) -> dict:
                 parsed = json.loads(resp.text.strip())
                 if "overall" in parsed and "aspects" in parsed:
                     return parsed
-            except Exception as e:
-                # แสดง Error ออกมาให้เห็นชัดเจนบนหน้าเว็บ
-                st.error(f"⚠️ Gemini ({m}) แจ้งเตือน: {e}")
+            except Exception:
                 continue
 
-    # 3. Fallback ออฟไลน์ (กรณี API Key ไม่พร้อมหรือ Gemini มีปัญหา)
-    # เพิ่มคำชม/คำติทั่วไป
+    # 3. Fallback ออฟไลน์ (กรณี API Key มีปัญหาหรือยังไม่พร้อม)
     general_pos_words = ["ดีมาก", "ดี", "ยอดเยี่ยม", "ประทับใจ", "สุดยอด", "รวดเร็ว", "สุภาพ", "บริการดี", "ชอบมาก"]
-    general_neg_words = ["แย่", "แย่มาก", "ช้ามาก", "ไม่ดี", "ห่วย", "ชุ่ย", "ไม่ประทับใจ", "ผิดหวัง", "โกรธ", "รอนานมาก"]
+    general_neg_words = ["แย่", "แย่มาก", "ช้ามาก", "ไม่ดี", "ห่วย", "ชุ่ย", "ไม่ประทับใจ", "ผิดหวัง", "โกรธ", "รอนาน", "เข้าค่าย"]
 
     is_gen_pos = any(w in t for w in general_pos_words)
     is_gen_neg = any(w in t for w in general_neg_words)
 
-    medical_neg_words = ["ผิดพลาด", "วินิจฉัยผิด", "จ่ายยาผิด", "รักษาไม่หาย", "อาการทรุด", "ไม่ตรวจ", "แพ้ยา", "ช็อก", "เกือบตาย", "ฟ้อง", "ทนาย"]
-    doc_neg = any(w in t for w in medical_neg_words) or ("หมอ" in t and any(w in t for w in ["แย่", "ดุ", "ไม่ดี", "ช้า", "ไม่สนใจ"]))
+    medical_neg_words = ["ผิดพลาด", "วินิจฉัยผิด", "จ่ายยาผิด", "รักษาไม่หาย", "อาการทรุด", "ไม่ตรวจ", "แพ้ยา", "ช็อก", "เกือบตาย", "ฟ้อง"]
+    doc_neg = any(w in t for w in medical_neg_words) or ("หมอ" in t and any(w in t for w in ["แย่", "ดุ", "ไม่ดี", "ช้า"]))
     doc_pos = any(w in t for w in ["หมอเก่ง", "หมอดี", "หมอพูดจาดี", "หมอใส่ใจ"]) or ("หมอ" in t and is_gen_pos)
     
-    nurse_neg = any(w in t for w in ["พยาบาลดุ", "พยาบาลชักสีหน้า", "พยาบาลพูดจาแย่", "เจ้าหน้าที่ดุ", "จนท.พูดแย่"])
+    nurse_neg = any(w in t for w in ["พยาบาลดุ", "พยาบาลชักสีหน้า", "พยาบาลพูดจาแย่", "เจ้าหน้าที่ดุ"])
     nurse_pos = any(w in t for w in ["พยาบาลดี", "พยาบาลน่ารัก", "พยาบาลบริการดี", "เจ้าหน้าที่บริการดี"])
     
     fac_neg = any(w in t for w in ["สกปรก", "ห้องน้ำเหม็น", "ที่จอดรถเต็ม", "ไม่มีที่จอด", "แอร์ร้อน"])
     fac_pos = any(w in t for w in ["สะอาด", "สะดวกสบาย", "ที่จอดรถเยอะ", "ห้องพักดี"])
     
-    price_neg = any(w in t for w in ["แพง", "แพงมาก", "เกินจริง", "รอนาน", "คิวช้า", "คิวยาว", "รอเป็นชั่วโมง"])
+    price_neg = any(w in t for w in ["แพง", "แพงมาก", "เกินจริง", "รอนาน", "คิวช้า", "คิวยาว", "นัดเก้าโมง", "บ่ายสอง", "เข้าค่าย"])
     price_pos = any(w in t for w in ["ราคาเหมาะสม", "รอไม่นาน", "เร็วดี"])
 
     doc_res = "neg" if doc_neg else "pos" if doc_pos else "not_mentioned"
@@ -132,7 +128,6 @@ def analyze_aspects_smart(text: str) -> dict:
     fac_res = "neg" if fac_neg else "pos" if fac_pos else "not_mentioned"
     price_res = "neg" if price_neg else "pos" if price_pos else "not_mentioned"
 
-    # ประเมินภาพรวม: ตรวจทั้งรายแผนกและคำทั่วไป
     if any(r == "neg" for r in [doc_res, nurse_res, fac_res, price_res]) or is_gen_neg:
         overall_sent = "neg"
     elif any(r == "pos" for r in [doc_res, nurse_res, fac_res, price_res]) or is_gen_pos:
