@@ -629,32 +629,42 @@ def inject_custom_css():
     .arrow-right { right: 52px; }
 
     /* แท็บเมนูหลัก */
+    /* จัดการแถบแท็บทั้งหมด (ทั้งแท็บหน้าและแท็บย่อย) */
     [data-testid="stTabs"] [data-baseweb="tab-list"] {
         background-color: #070d1f !important;
-        border-radius: 16px;
-        padding: 6px;
-        gap: 8px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        margin-bottom: 25px;
+        border-radius: 16px !important;
+        padding: 6px !important;
+        gap: 8px !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        margin-bottom: 22px !important;
     }
+
+    /* ซ่อนขีดเส้นใต้สีแดงดีฟอลต์ */
+    [data-testid="stTabs"] [data-baseweb="tab-highlight"],
+    [data-testid="stTabs"] [data-baseweb="tab-border"] {
+        display: none !important;
+    }
+
+    /* สไตล์ปุ่มแท็บทั่วไป */
     [data-testid="stTabs"] [data-baseweb="tab"] {
         color: #94a3b8 !important;
         border-radius: 12px !important;
-        padding: 10px 24px !important;
+        padding: 9px 20px !important;
         font-weight: 600 !important;
         border: none !important;
+        background-color: transparent !important;
+        transition: all 0.2s ease !important;
     }
-    [data-testid="stTabs"] [data-baseweb="tab"] p {
-        color: inherit !important;
-    }
+
+    /* เมื่อแท็บถูกเลือก (Active Tab) -> กล่องปุ่มมนสีฟ้า */
     [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
-        background: #0284c7 !important;
+        background-color: #0284c7 !important;
         color: #ffffff !important;
-        box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4) !important;
+        box-shadow: 0 4px 14px rgba(2, 132, 199, 0.45) !important;
     }
     [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] p {
         color: #ffffff !important;
+        font-weight: 700 !important;
     }
 
     /* กล่องการ์ดเนื้อหา */
@@ -2537,44 +2547,72 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
     }
 
 
-@st.dialog("📑 เครื่องมือแปลงไฟล์ PDF ร้องเรียนเป็น CSV (Batch PDF Ingestion)")
+# 1. แคชไฟล์ GIF เพื่อให้เปิด Pop-up ได้ไว ไม่หน่วง
+@st.cache_data
+def get_cached_rabbit_gif():
+    gif_path = Path("assets/rabbit-working.gif")
+    if gif_path.exists():
+        with open(gif_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    return ""
+
+# 2. ฟังก์ชัน Pop-up โทนสีขาวสว่าง ตัวหนังสือชัดเจนแบบเวอร์ชันเดิม
+@st.dialog("📄 เครื่องมือแปลงไฟล์ PDF ร้องเรียนเป็น CSV (Batch PDF Ingestion)")
 def open_pdf_batch_converter_dialog():
     st.markdown("""
         <style>
+            /* บังคับพื้นหลังของกล่อง Pop-up ให้เป็นการ์ดสีขาวแบบเวอร์ชันเดิม */
+            div[data-testid="stDialog"] > div {
+                background-color: #ffffff !important;
+                border-radius: 24px !important;
+                border: 1px solid rgba(226, 232, 240, 0.9) !important;
+                box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45) !important;
+                padding: 10px 15px !important;
+            }
             /* สีหัวข้อ Pop-up ให้เป็นสีเข้มชัดเจน */
             div[data-testid="stDialog"] h2, 
             div[data-testid="stDialog"] [data-testid="stDialogTitle"] {
                 color: #0f172a !important;
-                font-weight: 700 !important;
+                font-weight: 800 !important;
             }
-            /* สีข้อความคำอธิบายทั่วไป */
-            div[data-testid="stDialog"] p {
+            /* สีข้อความคำอธิบายและ label ให้อ่านง่าย */
+            div[data-testid="stDialog"] p,
+            div[data-testid="stDialog"] label,
+            div[data-testid="stDialog"] span {
                 color: #334155 !important;
+                font-weight: 500 !important;
             }
-            /* บังคับสีตัวอักษรของปุ่มด้านล่างให้เป็นสีขาวชัดเจน */
+            /* กรอบ Dropzone อัปโหลดไฟล์ */
+            div[data-testid="stDialog"] [data-testid="stFileUploader"] section {
+                background-color: #f8fafc !important;
+                border: 2px dashed #38bdf8 !important;
+            }
+            /* ข้อความบนปุ่มยังคงเป็นสีขาว */
             div[data-testid="stDialog"] button p,
             div[data-testid="stDialog"] button span {
                 color: #ffffff !important;
-                font-weight: 600 !important;
+                font-weight: 700 !important;
+            }
+            /* กากบาทปิด Pop-up */
+            div[data-testid="stDialog"] button[aria-label="Close"] svg {
+                fill: #0f172a !important;
             }
         </style>
     """, unsafe_allow_html=True)
     
-    # ==================== เพิ่มภาพเคลื่อนไหว GIF ด้านบน ====================
-    gif_path = Path("assets/rabbit-working.gif")
-    if gif_path.exists():
-        with open(gif_path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("utf-8")
-            st.markdown(
-                f'''
-                <div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: -10px 0 10px 0;">
-                    <img src="data:image/gif;base64,{encoded}" 
-                         style="width: 200px; height: auto; object-fit: contain; background: transparent; border: none; box-shadow: none;" />
-                </div>
-                ''',
-                unsafe_allow_html=True
-            )
-    # ======================================================================
+    # โหลด GIF ผ่าน Cache ทันทีในเสี้ยววินาที
+    encoded_gif = get_cached_rabbit_gif()
+    if encoded_gif:
+        st.markdown(
+            f'''
+            <div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: -10px 0 10px 0;">
+                <img src="data:image/gif;base64,{encoded_gif}" 
+                     style="width: 190px; height: auto; object-fit: contain; background: transparent; border: none;" />
+            </div>
+            ''',
+            unsafe_allow_html=True
+        )
+
     st.write("อัปโหลดไฟล์ PDF รายงานการร้องเรียนของคนไข้พร้อมกันหลายไฟล์ (สามารถลากไฟล์ทั้งโฟลเดอร์มาวางได้):")
 
     uploaded_pdfs = st.file_uploader(
@@ -2586,9 +2624,9 @@ def open_pdf_batch_converter_dialog():
 
     if uploaded_pdfs:
         st.markdown(f"""
-            <div style="background: #e0f2fe; border: 1px solid #7dd3fc; border-radius: 8px; padding: 10px 14px; margin: 12px 0; display: flex; align-items: center; gap: 8px;">
+            <div style="background: #e0f2fe; border: 1px solid #7dd3fc; border-radius: 10px; padding: 10px 14px; margin: 12px 0; display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 16px;">📁</span>
-                <span style="color: #0369a1; font-weight: 600; font-size: 14px;">ตรวจพบไฟล์ PDF ทั้งหมด: <b>{len(uploaded_pdfs)} ไฟล์</b></span>
+                <span style="color: #0369a1; font-weight: 700; font-size: 14px;">ตรวจพบไฟล์ PDF ทั้งหมด: {len(uploaded_pdfs)} ไฟล์</span>
             </div>
         """, unsafe_allow_html=True)
 
