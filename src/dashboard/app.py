@@ -629,42 +629,31 @@ def inject_custom_css():
     .arrow-right { right: 52px; }
 
     /* แท็บเมนูหลัก */
-    /* ========================================================= */
-    /* จัดการ TABS ทั้งหมด: ลบขีดแดงทิ้ง 100% + กล่องปุ่มมนสีฟ้า */
-    /* ========================================================= */
-    /* 1. พื้นหลังคอนเทนเนอร์แถบแท็บ */
-    div[data-testid="stTabs"] [role="tablist"] {
+    /* --- สไตล์แถบ Tabs ทั้งหมด --- */
+    div[data-testid="stTabs"] div[role="tablist"] {
         background-color: #070d1f !important;
         border-radius: 14px !important;
-        padding: 6px !important;
+        padding: 5px !important;
         gap: 6px !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        margin-bottom: 22px !important;
+        margin-bottom: 20px !important;
     }
 
-    /* 2. ลบขีดแดง/ส้ม และเส้นใต้ทุกรูปแบบของ Streamlit ทิ้งถาวร */
-    div[data-testid="stTabs"] [role="tablist"] > div,
-    div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
-    div[data-testid="stTabs"] [data-baseweb="tab-border"] {
+    /* ปิดเส้นใต้สีแดง/ส้ม และขอบเส้นแบ่งเดิมของ Streamlit ทั้งหมด */
+    div[data-testid="stTabs"] div[data-baseweb="tab-highlight"],
+    div[data-testid="stTabs"] div[data-baseweb="tab-border"],
+    div[data-testid="stTabs"] div[role="tablist"] > div:last-child {
         display: none !important;
-        opacity: 0 !important;
-        height: 0 !important;
-        visibility: hidden !important;
+        height: 0px !important;
+        background-color: transparent !important;
     }
 
-    div[data-testid="stTabs"] button[role="tab"]::after,
-    div[data-testid="stTabs"] button[role="tab"]::before {
-        display: none !important;
-        content: "" !important;
-    }
-
-    /* 3. สไตล์ปุ่มแท็บสถานะปกติ */
+    /* ปุ่มแท็บสถานะปกติ */
     div[data-testid="stTabs"] button[role="tab"] {
         border-radius: 10px !important;
         padding: 8px 18px !important;
         border: none !important;
         background-color: transparent !important;
-        box-shadow: none !important;
         transition: all 0.2s ease !important;
     }
 
@@ -672,14 +661,13 @@ def inject_custom_css():
     div[data-testid="stTabs"] button[role="tab"] span {
         color: #94a3b8 !important;
         font-weight: 600 !important;
-        font-size: 14px !important;
+        font-size: 14.5px !important;
     }
 
-    /* 4. เมื่อแท็บถูกเลือก (Active) -> กล่องปุ่มมนสีฟ้าสดใส */
+    /* ปุ่มแท็บเมื่อถูกเลือก (Active Tab) -> กล่องปุ่มมนสีฟ้า */
     div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
         background-color: #0284c7 !important;
-        box-shadow: 0 4px 14px rgba(2, 132, 199, 0.45) !important;
-        border: none !important;
+        box-shadow: 0 4px 12px rgba(2, 132, 199, 0.45) !important;
     }
 
     div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p,
