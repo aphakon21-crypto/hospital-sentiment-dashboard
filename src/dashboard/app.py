@@ -69,12 +69,10 @@ def analyze_aspects_smart(text: str) -> dict:
     # Hardcode Fallback Key เผื่อหาไฟล์ secrets.toml ไม่เจอ
 
 
-    # 2. เรียก Gemini แบบ Multi-Model Fallback เพื่อไม่ให้ติด 503/404
+    # 2. ยิงวิเคราะห์ด้วย Gemini
     if HAS_GENAI and api_key:
-        prompt = f"""
-คุณเป็นผู้เชี่ยวชาญด้านการวิเคราะห์ความรู้สึกและจำแนกมิติงานบริการของโรงพยาบาล
-วิเคราะห์ความคิดเห็นของผู้รับบริการด้านล่างนี้ และตอบกลับเป็น JSON ตามรูปแบบนี้เท่านั้น:
-
+        prompt = f"""คุณคือผู้เชี่ยวชาญด้านวิเคราะห์ความรู้สึกและบริการของโรงพยาบาล
+กรุณาวิเคราะห์ข้อความความคิดเห็นของผู้รับบริการต่อไปนี้ แล้วตอบกลับเป็น JSON เท่านั้น:
 {{
   "overall": "pos" | "neg" | "neu",
   "aspects": {{
@@ -85,21 +83,11 @@ def analyze_aspects_smart(text: str) -> dict:
   }}
 }}
 
-เกณฑ์การตัดสิน:
-1. "overall":
-   - "pos": ชม ชื่นชอบ พึงพอใจ
-   - "neg": บ่น ติเตียน ประชด ร้องเรียน แพ้ยา รักษาผิดพลาด อันตราย
-   - "neu": คำถาม สอบถามเวลา/คิว ข้อมูลทั่วไป
-2. "aspects":
-   - "doctor": หมอ การตรวจ รักษา สั่งจ่ายยา ความเชี่ยวชาญ
-   - "nurse_staff": พยาบาล เจ้าหน้าที่ บริการ การพูดจา
-   - "facility": สถานที่ ความสะอาด ที่จอดรถ
-   - "price_time": ราคา เวลารอคอย คิวตรวจ ความเร็ว
+ข้อความคนไข้: \"\"\"{text.strip()}\"\"\""""
 
-ข้อความ: \"\"\"{text.strip()}\"\"\"
-"""
         client = genai.Client(api_key=api_key)
-        candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        # ใช้ชื่อโมเดลมาตรฐานที่ใช้งานได้จริง
+        candidate_models = ["gemini-2.0-flash", "gemini-1.5-flash"]
         for m in candidate_models:
             try:
                 resp = client.models.generate_content(
@@ -113,7 +101,9 @@ def analyze_aspects_smart(text: str) -> dict:
                 parsed = json.loads(resp.text.strip())
                 if "overall" in parsed and "aspects" in parsed:
                     return parsed
-            except Exception:
+            except Exception as e:
+                # แสดง Error ออกมาให้เห็นชัดเจนบนหน้าเว็บ
+                st.error(f"⚠️ Gemini ({m}) แจ้งเตือน: {e}")
                 continue
 
     # 3. Fallback ออฟไลน์ (กรณี API Key ไม่พร้อมหรือ Gemini มีปัญหา)
