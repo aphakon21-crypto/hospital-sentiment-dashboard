@@ -2447,7 +2447,7 @@ def render_critical_incident_banner():
         # ==================== PDF COMPLAINT BATCH CONVERTER (ETL PIPELINE) ====================
 
 def extract_complaint_from_pdf(pdf_file) -> dict:
-    """อ่านและสกัดข้อมูลจากเนื้อหาไฟล์ PDF รายงานการร้องเรียน"""
+    """สกัดข้อมูลจากแบบฟอร์มข้อร้องเรียน Google Form PDF ของโรงพยาบาลสิริเวชได้อย่างแม่นยำ"""
     try:
         reader = PdfReader(pdf_file)
         full_text = ""
@@ -2455,63 +2455,136 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
             t = page.extract_text()
             if t:
                 full_text += t + "\n"
-    except Exception as e:
+    except Exception:
         full_text = ""
 
-    # ทำความสะอาดข้อความ
-    lines = [line.strip() for line in full_text.splitlines() if line.strip()]
-    raw_content = " ".join(lines)
-
-    # 1. สกัดวันที่ (เช่น 26/09/2026 หรือ 2026-09-26 หรือ วันที่ ...)
-    date_match = re.search(r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", raw_content)
-    date_val = date_match.group(1) if date_match else datetime.now().strftime("%Y-%m-%d")
-
-    # 2. สกัดเบอร์โทรศัพท์ (0xx-xxx-xxxx หรือ 0xxxxxxxxx)
-    phone_match = re.search(r"(0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})", raw_content)
-    phone_val = phone_match.group(1).replace(" ", "") if phone_match else "-"
-
-    # 3. สกัดชื่อลูกค้า (มองหาคีย์เวิร์ด ชื่อ, ผู้ร้องเรียน, คุณ หรือชื่อต้นข้อความ)
-    name_val = "-"
-    name_match = re.search(r"(?:ชื่อผู้ร้องเรียน|ชื่อ-นามสกุล|ชื่อคนไข้|ชื่อลูกค้า|คุณ)\s*[:\-]?\s*([ก-๙a-zA-Z\s]{2,40})", raw_content)
-    if name_match:
-        name_val = name_match.group(1).strip()
+    # ทำความสะอาดข้อความ ปรับช่องว่างให้อยู่ในรูปแบบอ่านง่าย
+    cleaned_text = re.sub(r"[ \t]+", " ", full_text)
+    
+    # -------------------------------------------------------------
+    # 1. วันที่รับบริการ (เช่น 06 / 07 / 2026 หรือ 06/07/2026)
+    # -------------------------------------------------------------
+    date_val = "-"
+    # ค้นหาหลังหัวข้อ "วันที่รับบริการ" หรือโครงสร้าง วว/ดด/ปปปป
+    date_section = re.search(r"วันที่รับบริการ.*?(?:\n.*?){0,3}?(\d{1,2}\s*[/และ\-]\s*\d{1,2}\s*[/และ\-]\s*\d{2,4})", cleaned_text)
+    if date_section:
+        raw_d = date_section.group(1).replace(" ", "")
+        parts = re.split(r"[/และ\-]", raw_d)
+        if len(parts) == 3:
+            d, m, y = parts[0].zfill(2), parts[1].zfill(2), parts[2]
+            # แปลง ค.ศ. / พ.ศ.
+            if len(y) == 2:
+                y = "20" + y
+            date_val = f"{y}-{m}-{d}"
+        else:
+            date_val = raw_d
     else:
-        # หากไม่พบคีย์เวิร์ด ให้ใช้ชื่อไฟล์แทน เช่น complaint_somchai.pdf -> somchai
-        base_name = Path(pdf_file.name).stem.replace("complaint_", "").replace("report_", "").strip()
-        if base_name:
-            name_val = base_name
+        # Fallback หากไม่พบในจุดแรก ให้ค้นหารูปแบบวันที่ทั่วไปในเอกสาร
+        general_date = re.search(r"(\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{4})", cleaned_text)
+        if general_date:
+            parts = [p.strip() for p in general_date.group(1).split("/")]
+            date_val = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
 
-    # 4. สกัดแผนกที่เกี่ยวข้อง
+    # -------------------------------------------------------------
+    # 2. เบอร์โทรศัพท์ติดต่อกลับ
+    # -------------------------------------------------------------
+    phone_val = "-"
+    phone_match = re.search(r"เบอร์โทรศัพท์ติดต่อกลับ.*?\n\s*([0-9\-\s]{9,15})", cleaned_text)
+    if phone_match:
+        cand = re.sub(r"[\s\-]", "", phone_match.group(1))
+        if cand.startswith("0") and len(cand) >= 9:
+            phone_val = cand
+    if phone_val == "-":
+        # ค้นหาเบอร์โทรศัพท์มือถือไทยทั่วไปในเอกสาร
+        phone_any = re.search(r"(0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})", cleaned_text)
+        if phone_any:
+            phone_val = re.sub(r"[\s\-]", "", phone_any.group(1))
+
+    # -------------------------------------------------------------
+    # 3. ชื่อ-สกุล ผู้ร้องเรียน
+    # -------------------------------------------------------------
+    name_val = "-"
+    # สกัดระหว่าง "ชื่อ-สกุล" ถึงก่อน "เบอร์โทรศัพท์ติดต่อกลับ"
+    name_match = re.search(r"ชื่อ(?:-|\s*)สกุล\s*\*?\s*(.*?)(?=เบอร์โทรศัพท์|ข้อเสนอแนะ|$)", cleaned_text, re.DOTALL)
+    if name_match:
+        cand_name = name_match.group(1).strip()
+        # ตัดเส้นประ, ขีด, หรือคำที่ไม่เกี่ยวข้อง
+        cand_name = re.sub(r"^[\s\-_.\u2026\u22EF]+", "", cand_name)
+        cand_name = cand_name.split("\n")[0].strip()
+        if cand_name and cand_name not in ["-", "_", ""]:
+            name_val = cand_name
+
+    # -------------------------------------------------------------
+    # 4. หน่วยงาน / แผนกที่รับบริการ
+    # -------------------------------------------------------------
     dept_val = "บริการทั่วไปของโรงพยาบาล"
-    dept_mapping = {
-        "แผนกอุบัติเหตุและฉุกเฉิน (ER)": ["er", "ฉุกเฉิน", "อุบัติเหตุ"],
-        "แผนกผู้ป่วยนอก (OPD)": ["opd", "ผู้ป่วยนอก", "อายุรกรรม"],
-        "แผนกผู้ป่วยใน (IPD)": ["ipd", "ผู้ป่วยใน", "หอผู้ป่วย", "วอร์ด", "เตียงพัก"],
-        "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์": ["ตรวจสุขภาพ", "checkup", "อาชีว"],
-        "ศูนย์กุมารเวชกรรม (คลินิกเด็ก)": ["เด็ก", "กุมาร", "pediatric"],
-        "ศูนย์ทันตกรรม": ["ทันตกรรม", "ทำฟัน", "ฟัน"],
-        "แผนกห้องปฏิบัติการและรังสีวิทยา": ["แล็บ", "lab", "เอกซเรย์", "x-ray", "เจาะเลือด"]
-    }
-    for d_name, keywords in dept_mapping.items():
-        if any(k in raw_content.lower() for k in keywords):
-            dept_val = d_name
-            break
+    dept_match = re.search(r"หน่วยงาน/แผนก\s*ที่รับบริการ\s*\*?\s*(.*?)(?=การรับบริการ|วันที่รับบริการ|$)", cleaned_text, re.DOTALL)
+    if dept_match:
+        raw_dept = dept_match.group(1).strip()
+        raw_dept = re.sub(r"^[\s\-_.\u2026\u22EF]+", "", raw_dept).split("\n")[0].strip()
+        d_lower = raw_dept.lower()
+        if any(k in d_lower for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน", "คิดเงิน"]):
+            dept_val = "แผนกการเงิน/ชำระเงิน"
+        elif any(k in d_lower for k in ["er", "ฉุกเฉิน"]):
+            dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
+        elif any(k in d_lower for k in ["opd", "ผู้ป่วยนอก"]):
+            dept_val = "แผนกผู้ป่วยนอก (OPD)"
+        elif any(k in d_lower for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]):
+            dept_val = "แผนกผู้ป่วยใน (IPD)"
+        elif any(k in d_lower for k in ["ตรวจสุขภาพ", "check-up", "checkup"]):
+            dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
+        elif any(k in d_lower for k in ["ฟัน", "ทันตกรรม"]):
+            dept_val = "แผนกทันตกรรม"
+        elif any(k in d_lower for k in ["ยา", "ห้องยา", "เภสัช"]):
+            dept_val = "แผนกเภสัชกรรม/ห้องยา"
+        elif raw_dept and raw_dept not in ["-", ""]:
+            dept_val = raw_dept
 
-    # 5. สกัดเนื้อหาข้อร้องเรียน / ความคิดเห็น
+    # -------------------------------------------------------------
+    # 5. ข้อร้องเรียน/ปัญหาที่พบ (ตัดข้อความระบบท้ายฟอร์มออก)
+    # -------------------------------------------------------------
     feedback_text = "-"
-    complaint_match = re.search(r"(?:ข้อร้องเรียน|รายละเอียด|ความคิดเห็น|ปัญหาที่พบ|เหตุการณ์)\s*[:\-]?\s*(.+)", raw_content)
+    # สกัดระหว่าง "ข้อร้องเรียน/ปัญหาที่พบ" จนถึงก่อนหัวข้อ "ข้อเสนอแนะอื่นๆ"
+    complaint_match = re.search(
+        r"ข้อร้องเรียน/ปัญหาที่พบ\s*(.*?)(?=ข้อเสนอแนะอื่นๆ|สิ่งที่ท่านชอบ|ชื่อ-สกุล|ทุกความคิดเห็นของท่าน|$)",
+        cleaned_text,
+        re.DOTALL
+    )
     if complaint_match:
-        feedback_text = complaint_match.group(1).strip()
-    elif len(raw_content) > 10:
-        # หากไม่พบคีย์เวิร์ด ให้ใช้เนื้อหาทั้งหมดที่อ่านได้
-        feedback_text = raw_content[:400]
+        raw_complaint = complaint_match.group(1).strip()
+        # ทำความสะอาดเส้นประหรือเครื่องหมายขีดล่างที่มาจากฟอร์ม
+        lines = []
+        for line in raw_complaint.splitlines():
+            line_str = line.strip()
+            # ข้ามบรรทัดที่เป็นเส้นประหรือขีดใต้ว่างเปล่า
+            if re.match(r"^[\s\-_.\u2026\u22EF]+$", line_str):
+                continue
+            if line_str:
+                lines.append(line_str)
+        extracted = " ".join(lines).strip()
+        if extracted and extracted != "-":
+            feedback_text = extracted
+
+    # หากช่องข้อร้องเรียนเว้นว่าง ให้ลองสกัดจากช่อง "สิ่งที่ท่านชอบ/ประทับใจ" เพื่อนำมาวิเคราะห์คำชม
+    if feedback_text == "-":
+        praise_match = re.search(
+            r"สิ่งที่ท่านชอบ/ประทับใจ\s*(.*?)(?=ข้อร้องเรียน|ข้อเสนอแนะอื่นๆ|$)",
+            cleaned_text,
+            re.DOTALL
+        )
+        if praise_match:
+            raw_praise = praise_match.group(1).strip()
+            lines = [l.strip() for l in raw_praise.splitlines() if not re.match(r"^[\s\-_.\u2026\u22EF]+$", l.strip()) and l.strip()]
+            extracted_praise = " ".join(lines).strip()
+            if extracted_praise and extracted_praise != "-":
+                feedback_text = f"[คำชม/ประทับใจ] {extracted_praise}"
 
     return {
         "วันที่": date_val,
-        "ชื่อลูกค้า": name_val if name_val else "-",
-        "เบอร์ติดต่อกลับ": phone_val if phone_val else "-",
+        "ชื่อลูกค้า": name_val,
+        "เบอร์ติดต่อกลับ": phone_val,
         "แผนกที่เกี่ยวข้อง": dept_val,
-        "ข้อความความคิดเห็นของลูกค้า": feedback_text if feedback_text else "-"
+        "ข้อความความคิดเห็นของลูกค้า": feedback_text
     }
 
 
