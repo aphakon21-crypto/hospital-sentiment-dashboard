@@ -2447,11 +2447,13 @@ def render_critical_incident_banner():
         # ==================== PDF COMPLAINT BATCH CONVERTER (ETL PIPELINE) ====================
 
 import time
+import json
+import re
 
 def extract_complaint_from_pdf(pdf_file) -> dict:
-    """ไพ่ตาย: ใช้ Gemini AI สกัดข้อมูลจาก PDF โดยตรง แก้ปัญหาสระแตกและสลับบรรทัดแบบ 100%"""
+    """ใช้ Gemini AI สกัดข้อมูล พร้อมระบบทำความสะอาด JSON และป้องกัน Rate Limit"""
     
-    # 1. ใช้ pypdf ดึงข้อความมาแบบดิบๆ (ไม่ต้องสนใจว่ามันจะสลับบรรทัด หรือเว้นวรรคมั่วแค่ไหน)
+    # 1. ดึงข้อความดิบจาก PDF
     try:
         reader = PdfReader(pdf_file)
         pages_text = [page.extract_text() or "" for page in reader.pages]
@@ -2459,7 +2461,7 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
     except Exception:
         raw_text = ""
         
-    # 2. ดึง API Key จาก Secrets
+    # 2. ดึง API Key
     api_key = None
     try:
         if "GEMINI_API_KEY" in st.secrets:
@@ -2469,61 +2471,71 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
     if not api_key:
         api_key = os.getenv("GEMINI_API_KEY", "")
 
-    # 3. ให้ Gemini AI ทำหน้าที่เป็น Data Extractor (สกัดและจัดระเบียบข้อมูล)
+    # 3. ส่งให้ AI วิเคราะห์
     if HAS_GENAI and api_key and raw_text.strip():
         try:
             client = genai.Client(api_key=api_key)
-            # Prompt สั่งการให้ AI ค้นหาและกรองข้อมูลให้ตรงเป๊ะ
             prompt = f"""คุณคือผู้เชี่ยวชาญด้าน Data Extraction
-จงอ่านข้อความที่ถูกดึงมาจากแบบฟอร์ม PDF ต่อไปนี้ (ข้อความอาจมีสระภาษาไทยที่แตกแยกกัน หรือบรรทัดสลับกัน ให้คุณทำความเข้าใจเนื้อหาจากบริบท)
+จงอ่านข้อความจากแบบฟอร์ม PDF ต่อไปนี้ (สระภาษาไทยอาจแตก หรือบรรทัดสลับกัน ให้ทำความเข้าใจจากบริบท)
 
 ข้อความ:
 '''{raw_text}'''
 
-จงสกัดข้อมูลแล้วตอบกลับเป็น JSON Format เท่านั้น โดยมี Key ดังนี้:
+สกัดข้อมูลและตอบกลับเป็น JSON Format เท่านั้น ห้ามมีคำอธิบายอื่น ห้ามมี Markdown ครอบ:
 {{
     "วันที่": "ค้นหาวันที่รับบริการ แปลงเป็นรูปแบบ YYYY-MM-DD (เช่น 2026-07-20) ถ้าหาไม่เจอให้ใส่ '-'",
-    "ชื่อลูกค้า": "ดึงชื่อ-สกุลของลูกค้า หากไม่มี, หรือพิมพ์แค่ผู้ป่วย/ญาติ หรือเป็นเครื่องหมายขีด ให้ใส่ '-'",
-    "เบอร์ติดต่อกลับ": "ดึงเฉพาะหมายเลขโทรศัพท์ 9-10 หลัก (วิเคราะห์แยกออกจากวันที่ให้ถูกต้อง) ถ้าไม่มีให้ใส่ '-'",
-    "แผนกที่เกี่ยวข้อง": "วิเคราะห์จากข้อความแล้วจับคู่แผนกให้ตรงกับหมวดหมู่นี้: 'แผนกผู้ป่วยนอก (OPD)', 'แผนกอุบัติเหตุและฉุกเฉิน (ER)', 'แผนกเภสัชกรรม/ห้องยา', 'แผนกการเงิน/ชำระเงิน', 'ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์' หรือถ้าไม่เข้าพวกเลยให้ใส่ 'บริการทั่วไปของโรงพยาบาล'",
-    "ข้อความความคิดเห็นของลูกค้า": "ดึงเฉพาะ 'ข้อร้องเรียน' หรือ 'ข้อเสนอแนะ' (ถ้ามีทั้งคู่ให้เขียนรวมกัน) หากไม่มีความเห็นให้ดึง 'สิ่งที่ประทับใจ' มาแทน. ห้ามนำชื่อหัวข้อ หรือประโยคท้ายฟอร์มมาใส่เด็ดขาด และถ้าลูกค้าตอบว่า 'ไม่มี', 'หาไม่เจอ' ให้ข้ามไป ถือว่าไม่มีความคิดเห็น (ให้ใส่ '-')"
+    "ชื่อลูกค้า": "ดึงชื่อ-สกุลของลูกค้า หากไม่มี หรือเป็นเครื่องหมายขีด ให้ใส่ '-'",
+    "เบอร์ติดต่อกลับ": "ดึงหมายเลขโทรศัพท์ 9-10 หลัก (อย่าเอาตัวเลขวันที่มาใส่) ถ้าไม่มีให้ใส่ '-'",
+    "แผนกที่เกี่ยวข้อง": "จับคู่ให้ตรงกับ: 'แผนกผู้ป่วยนอก (OPD)', 'แผนกอุบัติเหตุและฉุกเฉิน (ER)', 'แผนกเภสัชกรรม/ห้องยา', 'แผนกการเงิน/ชำระเงิน', 'ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์' หากไม่เข้าพวกใส่ 'บริการทั่วไปของโรงพยาบาล'",
+    "ข้อความความคิดเห็นของลูกค้า": "ดึงเฉพาะ 'ข้อร้องเรียน' หรือ 'ข้อเสนอแนะ' (ถ้ามีทั้งคู่ให้เขียนรวมกัน) หากไม่มีให้ดึง 'สิ่งที่ประทับใจ'. ถ้าลูกค้าเขียนว่า 'ไม่มี', 'หาไม่เจอ' ให้ใส่ '-'"
 }}"""
             
-            # ใช้รุ่น Flash เพื่อความรวดเร็วในการประมวลผลทีละหลายๆ ไฟล์
-            candidate_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-1.5-flash"]
+            # ใช้รุ่นที่เสถียรและรองรับการประมวลผลข้อความ
+            candidate_models = ["gemini-1.5-flash", "gemini-2.0-flash"]
+            ai_success = False
+            
             for m in candidate_models:
+                if ai_success: break
                 try:
                     resp = client.models.generate_content(
                         model=m,
                         contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            temperature=0.0
-                        )
+                        config=types.GenerateContentConfig(temperature=0.0)
                     )
-                    parsed = json.loads(resp.text.strip())
                     
-                    # หน่วงเวลาเล็กน้อยป้องกัน API Limit เวลากดอัปโหลดแบบ Bulk
-                    time.sleep(0.5) 
+                    # พระเอกของงาน: ล้าง Markdown (```json ... ```) ออกก่อนแปลงเป็น Dict
+                    out_text = resp.text.strip()
+                    out_text = re.sub(r"^```(?:json)?\s*", "", out_text)
+                    out_text = re.sub(r"\s*```$", "", out_text)
+                    
+                    parsed = json.loads(out_text)
+                    ai_success = True
+                    
+                    # ดีเลย์ 1.5 วินาที ป้องกัน Google API บล็อกเวลาอัปโหลดไฟล์ Bulk
+                    time.sleep(1.5) 
                     
                     return {
-                        "วันที่": parsed.get("วันที่", "-"),
-                        "ชื่อลูกค้า": parsed.get("ชื่อลูกค้า", "-"),
-                        "เบอร์ติดต่อกลับ": parsed.get("เบอร์ติดต่อกลับ", "-"),
-                        "แผนกที่เกี่ยวข้อง": parsed.get("แผนกที่เกี่ยวข้อง", "บริการทั่วไปของโรงพยาบาล"),
-                        "ข้อความความคิดเห็นของลูกค้า": parsed.get("ข้อความความคิดเห็นของลูกค้า", "-")
+                        "วันที่": str(parsed.get("วันที่", "-")),
+                        "ชื่อลูกค้า": str(parsed.get("ชื่อลูกค้า", "-")),
+                        "เบอร์ติดต่อกลับ": str(parsed.get("เบอร์ติดต่อกลับ", "-")),
+                        "แผนกที่เกี่ยวข้อง": str(parsed.get("แผนกที่เกี่ยวข้อง", "บริการทั่วไปของโรงพยาบาล")),
+                        "ข้อความความคิดเห็นของลูกค้า": str(parsed.get("ข้อความความคิดเห็นของลูกค้า", "-"))
                     }
-                except Exception:
-                    continue
-        except Exception as e:
-            pass
+                except Exception as e:
+                    continue # หากโมเดลแรกพัง ให้ลองโมเดลถัดไป
+            
+            if not ai_success:
+                st.error("⚠️ AI แปลงข้อมูลไม่สำเร็จ (อาจเกิดจากข้อจำกัด API หรือ JSON ผิดพลาด)")
+                
+        except Exception:
+            st.error("⚠️ ไม่สามารถเชื่อมต่อกับ Gemini API ได้")
 
-    # === 4. Fallback แบบพื้นฐาน (กรณีเน็ตหลุด หรือ API Error) ===
+    # === 4. Fallback ออฟไลน์ ===
     condensed = re.sub(r"[\s\u200B\uFEFF\uFFFD\*\_\.]", "", raw_text)
     dept = "บริการทั่วไปของโรงพยาบาล"
-    if "เภสัช" in condensed or "ห้องยา" in condensed or "จัดยา" in condensed: dept = "แผนกเภสัชกรรม/ห้องยา"
-    elif "การเงิน" in condensed or "ชำระเงิน" in condensed: dept = "แผนกการเงิน/ชำระเงิน"
-    elif "ศัลย" in condensed or "กระดูก" in condensed: dept = "แผนกผู้ป่วยนอก (OPD)"
+    if any(k in condensed for k in ["เภสัช", "ห้องยา", "จัดยา"]): dept = "แผนกเภสัชกรรม/ห้องยา"
+    elif any(k in condensed for k in ["การเงิน", "ชำระเงิน"]): dept = "แผนกการเงิน/ชำระเงิน"
+    elif any(k in condensed for k in ["ศัลย", "กระดูก", "opd"]): dept = "แผนกผู้ป่วยนอก (OPD)"
     
     return {
         "วันที่": "-",
