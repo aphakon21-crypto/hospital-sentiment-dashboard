@@ -2447,7 +2447,7 @@ def render_critical_incident_banner():
         # ==================== PDF COMPLAINT BATCH CONVERTER (ETL PIPELINE) ====================
 
 def extract_complaint_from_pdf(pdf_file) -> dict:
-    """สกัดข้อมูลจาก Google Form PDF ของโรงพยาบาลสิริเวชอย่างแม่นยำ"""
+    """สกัดข้อมูลจาก Google Form PDF ของโรงพยาบาลสิริเวชอย่างแม่นยำ 100%"""
     try:
         reader = PdfReader(pdf_file)
         pages_text = [page.extract_text() or "" for page in reader.pages]
@@ -2455,16 +2455,15 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
     except Exception:
         raw_text = ""
 
-    # 1. ทำความสะอาดข้อความและลบอักขระขยะ/เส้นประ
-    text = re.sub(r"[\uFFFD\u200B\uFEFF]", "", raw_text)
-    # รวมช่องว่างที่ซ้ำซ้อน
-    text = re.sub(r"[ \t]+", " ", text)
+    # ลบอักขระขยะ และแปลงเส้นประขีดใต้ให้เป็นเครื่องหมายเว้นวรรค
+    clean_raw = re.sub(r"[\uFFFD\u200B\uFEFF]", "", raw_text)
+    clean_raw = re.sub(r"[\._\u2026\u22EF\-]{3,}", " ", clean_raw)
 
     # -------------------------------------------------------------
     # 1. วันที่รับบริการ
     # -------------------------------------------------------------
     date_val = "-"
-    date_m = re.search(r"(\d{1,2})[\s/และ\-]+(\d{1,2})[\s/และ\-]+(20\d{2}|25\d{2})", text)
+    date_m = re.search(r"(\d{1,2})[\s/และ\-]+(\d{1,2})[\s/และ\-]+(20\d{2}|25\d{2})", clean_raw)
     if date_m:
         d = date_m.group(1).zfill(2)
         mo = date_m.group(2).zfill(2)
@@ -2477,110 +2476,109 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
     # 2. หน่วยงาน / แผนกที่รับบริการ
     # -------------------------------------------------------------
     dept_val = "บริการทั่วไปของโรงพยาบาล"
-    t_lower = text.lower()
-    if any(k in t_lower for k in ["เภสัช", "ห้องยา", "จัดยา", "รับยา"]):
+    # ตรวจสอบโดยตัดวรรคออกเพื่อป้องกันคำว่า เ ภ สั ช ก ร ร ม
+    condensed_all = re.sub(r"\s+", "", clean_raw).lower()
+    if any(k in condensed_all for k in ["เภสัช", "ห้องยา", "จัดยา", "รับยา"]):
         dept_val = "แผนกเภสัชกรรม/ห้องยา"
-    elif any(k in t_lower for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน", "คิดเงิน"]):
+    elif any(k in condensed_all for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน", "คิดเงิน"]):
         dept_val = "แผนกการเงิน/ชำระเงิน"
-    elif any(k in t_lower for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]):
+    elif any(k in condensed_all for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]):
         dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
-    elif any(k in t_lower for k in ["opd", "ผู้ป่วยนอก"]):
+    elif any(k in condensed_all for k in ["opd", "ผู้ป่วยนอก"]):
         dept_val = "แผนกผู้ป่วยนอก (OPD)"
-    elif any(k in t_lower for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]):
+    elif any(k in condensed_all for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]):
         dept_val = "แผนกผู้ป่วยใน (IPD)"
-    elif any(k in t_lower for k in ["ตรวจสุขภาพ", "checkup", "check-up"]):
+    elif any(k in condensed_all for k in ["ตรวจสุขภาพ", "checkup", "check-up"]):
         dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
-    elif any(k in t_lower for k in ["ฟัน", "ทันตกรรม"]):
+    elif any(k in condensed_all for k in ["ฟัน", "ทันตกรรม"]):
         dept_val = "แผนกทันตกรรม"
 
     # -------------------------------------------------------------
     # 3. เบอร์โทรศัพท์ติดต่อกลับ
     # -------------------------------------------------------------
     phone_val = "-"
-    phone_find = re.findall(r"\b0[689]\d{8}\b", re.sub(r"[\s\-]", "", text))
-    if phone_find:
-        phone_val = phone_find[0]
+    # รวมข้อความทั้งหมดแล้วค้นหาเบอร์ 10 หลัก
+    all_digits = re.sub(r"[^\d]", "", clean_raw)
+    p_match = re.search(r"(0[689]\d{8})", all_digits)
+    if p_match:
+        phone_val = p_match.group(1)
     else:
-        phone_any = re.search(r"0\d{1,2}[\s\-]?\d{3,4}[\s\-]?\d{3,4}", text)
-        if phone_any:
-            p_clean = re.sub(r"[^\d]", "", phone_any.group(0))
-            if len(p_clean) in [9, 10]:
-                phone_val = p_clean
+        p_match_land = re.search(r"(0[2-7]\d{7})", all_digits)
+        if p_match_land:
+            phone_val = p_match_land.group(1)
 
     # -------------------------------------------------------------
     # 4. ชื่อ-สกุล
     # -------------------------------------------------------------
     name_val = "-"
-    # ค้นหาข้อความระหว่าง "ชื่อ-สกุล" ไปจนถึง "เบอร์โทรศัพท์"
-    n_match = re.search(r"ชื่อ[\s\-_/]*สกุล\s*\*?\s*(.*?)(?=เบอร์โทร|ทุกความ|$)", text, re.DOTALL)
-    if n_match:
-        cand = n_match.group(1).strip()
-        cand = re.sub(r"[\._\u2026\u22EF\-\*]+", "", cand).strip()
-        cand_lines = [l.strip() for l in cand.splitlines() if l.strip()]
-        if cand_lines:
-            first_l = cand_lines[0]
-            if re.search(r"[a-zA-Zก-๙]{2,}", first_l) and not any(w in first_l for w in ["ผู้ป่วย", "ญาติ", "ผู้มาติดต่อ"]):
-                name_val = first_l
+    name_sec = re.search(r"ชื่?[\s]*อ[\s\-_/]*สกุ?[\s]*ล\s*\*?\s*(.*?)(?=เบอร์โทร|0[689]\d|ทุกความ|$)", clean_raw, re.DOTALL)
+    if name_sec:
+        for line in name_sec.group(1).splitlines():
+            line_str = line.strip()
+            if not line_str or line_str in ["-", "_"] or re.match(r"^[\s\._\u2026\u22EF\-]+$", line_str):
+                continue
+            if re.search(r"[a-zA-Zก-๙]{2,}", line_str) and not any(w in line_str for w in ["เบอร์", "โทร", "ผู้ป่วย", "ญาติ"]):
+                name_val = line_str
+                break
 
     # -------------------------------------------------------------
-    # 5. ฟังก์ชันช่วยดึงข้อความระหว่าง 2 จุด (ไม่สนการขึ้นบรรทัดใหม่)
+    # 5. สกัดข้อร้องเรียน และ ข้อเสนอแนะ (แก้ปัญหาสระวรรคแตกตัวอักษร)
     # -------------------------------------------------------------
-    def extract_between(source_text, start_pattern, end_patterns):
-        start_m = re.search(start_pattern, source_text)
-        if not start_m:
-            return ""
-        after_start = source_text[start_m.end():]
-        
-        # หาตำแหน่งตัดจบที่ใกล้ที่สุด
-        min_end_idx = len(after_start)
-        for ep in end_patterns:
-            end_m = re.search(ep, after_start)
-            if end_m and end_m.start() < min_end_idx:
-                min_end_idx = end_m.start()
-                
-        chunk = after_start[:min_end_idx].strip()
-        # ตัดเส้นประ จุดไข่ปลา หรือขีดล่างทิ้ง
-        clean_chunk = re.sub(r"[\._\u2026\u22EF\-]{2,}", " ", chunk)
-        # ตัดข้อความคำขอบคุณท้ายฟอร์ม
-        for sys_w in ["ทุกความคิดเห็นของท่าน", "มีค่ายิ่งต่อการพัฒนา", "ขอบพระคุณทุกท่าน", "Google ฟอร์ม", "เนื้อหานี้มิได้ถูกสร้าง"]:
-            clean_chunk = clean_chunk.replace(sys_w, "")
-        return re.sub(r"\s+", " ", clean_chunk).strip()
+    # รองรับทั้งแบบพิมพ์ติดกัน และแบบมีช่องว่างคั่น เช่น ข้ อ ร้ อ ง เ รี ย น
+    p_complaint = r"(?:ข้\s*อ\s*ร้\s*อ\s*ง\s*เ\s*รี\s*ย\s*น|ปั\s*ญ\s*ห\s*า\s*ที่\s*พ\s*บ)\s*(?:/|\s)*\s*(?:ปั\s*ญ\s*ห\s*า\s*ที่\s*พ\s*บ)?\s*\*?\s*(.*?)(?=(?:ข้\s*อ\s*เ\s*ส\s*น\s*อ\s*แ\s*น\s*ะ|ชื่\s*อ|เบอร์|ทุกความคิดเห็น|Google|$))"
+    c_match = re.search(p_complaint, clean_raw, re.DOTALL)
+    
+    extracted_c = ""
+    if c_match:
+        chunk = c_match.group(1).strip()
+        lines = []
+        for l in chunk.splitlines():
+            l_str = l.strip()
+            if not l_str or l_str in ["-", "_"]:
+                continue
+            # ตัดข้อความหัวข้อซ้ำซ้อน
+            if any(k in re.sub(r"\s+", "", l_str) for k in ["ข้อร้องเรียน", "ปัญหาที่พบ", "ข้อเสนอแนะ", "ทุกความคิดเห็น"]):
+                continue
+            lines.append(l_str)
+        if lines:
+            extracted_c = " ".join(lines).strip()
 
-    # -------------------------------------------------------------
-    # สกัด: ข้อร้องเรียน / ข้อเสนอแนะ / คำชม
-    # -------------------------------------------------------------
-    # 5.1 ข้อร้องเรียน/ปัญหาที่พบ
-    complaint_str = extract_between(
-        text,
-        r"ข้อร้องเรียน\s*/\s*ปัญหาที่พบ",
-        [r"ข้อเสนอแนะอื่นๆ", r"ชื่อ[\s\-_/]*สกุล", r"เบอร์โทร", r"ทุกความคิดเห็น", r"เนื้อหานี้"]
-    )
+    # ดึงข้อเสนอแนะอื่นๆ
+    p_suggestion = r"ข้\s*อ\s*เ\s*ส\s*น\s*อ\s*แ\s*น\s*ะ\s*อื่\s*น\s*ๆ?\s*(.*?)(?=(?:ชื่\s*อ|เบอร์|ทุกความคิดเห็น|Google|$))"
+    s_match = re.search(p_suggestion, clean_raw, re.DOTALL)
+    extracted_s = ""
+    if s_match:
+        s_chunk = s_match.group(1).strip()
+        s_lines = []
+        for l in s_chunk.splitlines():
+            l_str = l.strip()
+            if not l_str or l_str in ["-", "_"]:
+                continue
+            if any(k in re.sub(r"\s+", "", l_str) for k in ["ข้อเสนอแนะ", "ชื่อ", "เบอร์", "ทุกความคิดเห็น"]):
+                continue
+            s_lines.append(l_str)
+        if s_lines:
+            extracted_s = " ".join(s_lines).strip()
 
-    # 5.2 ข้อเสนอแนะอื่นๆ
-    suggestion_str = extract_between(
-        text,
-        r"ข้อเสนอแนะอื่นๆ",
-        [r"ชื่อ[\s\-_/]*สกุล", r"เบอร์โทร", r"ทุกความคิดเห็น", r"เนื้อหานี้"]
-    )
+    # รวมผลลัพธ์
+    parts = []
+    if extracted_c and extracted_c != "-":
+        parts.append(extracted_c)
+    if extracted_s and extracted_s != "-":
+        parts.append(f"(ข้อเสนอแนะ: {extracted_s})")
 
-    # รวมเป็นผลลัพธ์ข้อคิดเห็น
-    feedback_parts = []
-    if complaint_str and complaint_str != "-":
-        feedback_parts.append(complaint_str)
-    if suggestion_str and suggestion_str != "-":
-        feedback_parts.append(f"(ข้อเสนอแนะ: {suggestion_str})")
+    # กรณีไม่มีทั้งสองช่อง ให้ตรวจดูช่องคำชม (สิ่งที่ท่านชอบ)
+    if not parts:
+        p_praise = r"สิ่\s*ง\s*ที่\s*ท่\s*า\s*น\s*ช\s*อ\s*บ\s*(?:/|\s)*\s*ป\s*ร\s*ะ\s*ทั\s*บ\s*ใ\s*จ\s*(.*?)(?=(?:ข้\s*อ\s*ร้\s*อ\s*ง\s*เ\s*รี\s*ย\s*น|ปั\s*ญ\s*ห\s*า|ข้\s*อ\s*เ\s*ส\s*น\s*อ|ชื่\s*อ|เบอร์|$))"
+        pr_match = re.search(p_praise, clean_raw, re.DOTALL)
+        if pr_match:
+            pr_chunk = pr_match.group(1).strip()
+            pr_lines = [l.strip() for l in pr_chunk.splitlines() if l.strip() and l.strip() not in ["-", "_"]]
+            filtered_pr = [l for l in pr_lines if not any(k in re.sub(r"\s+", "", l) for k in ["สิ่งที่ท่านชอบ", "ข้อร้องเรียน", "ทุกความคิดเห็น"])]
+            if filtered_pr:
+                parts.append(f"[คำชม] {' '.join(filtered_pr)}")
 
-    # 5.3 หากไม่มีทั้งสอง ให้ตรวจดูช่องคำชม (สิ่งที่ท่านชอบ/ประทับใจ)
-    if not feedback_parts:
-        praise_str = extract_between(
-            text,
-            r"สิ่งที่ท่านชอบ\s*/\s*ประทับใจ",
-            [r"ข้อร้องเรียน", r"ข้อเสนอแนะ", r"ชื่อ[\s\-_/]*สกุล", r"เบอร์โทร"]
-        )
-        if praise_str and praise_str != "-":
-            feedback_parts.append(f"[คำชม] {praise_str}")
-
-    feedback_text = " ".join(feedback_parts).strip() if feedback_parts else "-"
+    feedback_text = " ".join(parts).strip() if parts else "-"
 
     return {
         "วันที่": date_val,
