@@ -2447,129 +2447,124 @@ def render_critical_incident_banner():
         # ==================== PDF COMPLAINT BATCH CONVERTER (ETL PIPELINE) ====================
 
 def extract_complaint_from_pdf(pdf_file) -> dict:
-    """สกัดข้อมูลจาก Google Form PDF ด้วยวิธี Zero-Space Anchor (แก้ปัญหา PDF สระ/วรรคเพี้ยน 100%)"""
+    """สกัดข้อมูลจาก Google Form PDF ด้วยวิธี Smart Tokenizer (แก้ปัญหาสระและช่องว่างเพี้ยน 100%)"""
     try:
         reader = PdfReader(pdf_file)
         pages_text = [page.extract_text() or "" for page in reader.pages]
-        raw_text = "".join(pages_text)
+        raw_text = " ".join(pages_text)
     except Exception:
         raw_text = ""
 
-    # 1. ล้างอักขระขยะ และเส้นประ/จุดไข่ปลา
-    clean_text = re.sub(r"[\uFFFD\u200B\uFEFF\*\.\_]", "", raw_text)
-    clean_text = clean_text.replace("ววดดปปปป", "").replace("ววดดปป", "")
-    
-    # 2. พระเอกของงาน: ลบ "ช่องว่างทั้งหมด" เพื่อให้คำวิ่งมาชนกัน ป้องกันปัญหาสระแยกตัว
-    no_space_text = re.sub(r"\s+", "", clean_text)
+    # 1. ล้างอักขระขยะพื้นฐาน และสัญลักษณ์เส้นประที่มาจากฟอร์ม
+    text = re.sub(r"[\u200b\ufffd\ufeff\*\_\.\|]", " ", raw_text)
+    text = re.sub(r"\s+", " ", text)  # ปรับช่องว่างให้เป็นเว้นวรรคเดียวทั้งหมด
 
-    # 3. กำหนดจุดตัด (Anchors) แบบไม่มีช่องว่าง
-    anchors = {
-        "title": ["ข้อเสนอแนะ/ข้อร้องเรียน", "ของผู้ใช้บริการ"],
-        "type": ["ผู้เสนอแนะ"],
-        "date": ["วันที่รับบริการ"],
-        "dept": ["หน่วยงาน/แผนกที่รับบริการ", "หน่วยงาน/แผนก", "หน่วยงาน"],
-        "service": ["การรับบริการ"],
-        "praise": ["สิ่งที่ท่านชอบ/ประทับใจ", "สิ่งที่ท่านชอบ", "ประทับใจ"],
-        "complaint": ["ข้อร้องเรียน/ปัญหาที่พบ", "ข้อร้องเรียน", "ปัญหาที่พบ"],
-        "suggest": ["ข้อเสนอแนะอื่นๆ", "ข้อเสนอแนะ"],
-        "name": ["ชื่อ-สกุล", "ชื่อสกุล"],
-        "phone": ["เบอร์โทรศัพท์ติดต่อกลับ", "เบอร์โทรศัพท์", "เบอร์โทร"],
-        "footer": ["ทุกความคิดเห็นของท่าน", "มีค่ายิ่งต่อการพัฒนา", "Googleฟอร์ม", "เนื้อหานี้มิได้ถูกสร้าง"]
+    # 2. ฟังก์ชันสร้าง Regex ที่อนุญาตให้มีช่องว่างระหว่างตัวอักษรได้ (แก้ปัญหา pypdf แยกสระไทย)
+    def space_pattern(word):
+        return r"\s*".join(re.escape(c) for c in word)
+
+    # 3. กำหนดคำค้นหาที่ "เจาะจงเฉพาะหัวข้อ" (หลีกเลี่ยงชื่อหัวกระดาษ 100%)
+    markers = {
+        "วันที่รับบริการ": " [[DATE]] ",
+        "หน่วยงาน/แผนก": " [[DEPT]] ",
+        "สิ่งที่ท่านชอบ": " [[PRAISE]] ",
+        "ปัญหาที่พบ": " [[COMPLAINT]] ",   # ใช้คำนี้เพื่อหลบคำว่า ข้อร้องเรียน บนหัวกระดาษ
+        "ข้อเสนอแนะอื่นๆ": " [[SUGGEST]] ",
+        "สกุล": " [[NAME]] ",             # ใช้คำว่า สกุล เพื่อข้ามเครื่องหมาย -
+        "เบอร์โทรศัพท์": " [[PHONE]] ",
+        "ทุกความคิดเห็น": " [[END]] ",
+        "Google ฟอร์ม": " [[END]] "
     }
 
-    # 4. หาตำแหน่งของแต่ละหัวข้อบนข้อความที่ไม่มีช่องว่าง
-    found_anchors = []
-    for key, aliases in anchors.items():
-        best_pos = -1
-        match_len = 0
-        for alias in aliases:
-            idx = no_space_text.find(alias)
-            if idx != -1:
-                best_pos = idx
-                match_len = len(alias)
-                break
-        if best_pos != -1:
-            found_anchors.append((best_pos, best_pos + match_len, key))
+    # แปลงคำหัวข้อที่แตกกระจาย ให้กลายเป็น Token หลักเพื่อง่ายต่อการดึง
+    for word, token in markers.items():
+        pattern = space_pattern(word)
+        text = re.sub(pattern, token, text)
 
-    # เรียงลำดับจากบนลงล่างตามตำแหน่งจริงในเอกสาร
-    found_anchors.sort(key=lambda x: x[0])
+    # 4. ฟังก์ชันดึงข้อความที่อยู่ระหว่าง Token
+    def get_section(start_token, next_tokens):
+        start_idx = text.find(start_token)
+        if start_idx == -1: return ""
+        
+        start_pos = start_idx + len(start_token)
+        end_pos = len(text)
+        
+        for nt in next_tokens:
+            idx = text.find(nt, start_pos)
+            if idx != -1 and idx < end_pos:
+                end_pos = idx
+                
+        res = text[start_pos:end_pos].strip()
+        # ล้างคำที่ติดมากับหัวข้อฟอร์ม
+        res = re.sub(r"(วว\s*ดด\s*ปปปป|ติดต่อกลับ|ที่รับบริการ|ของท่าน)", "", res).strip()
+        res = re.sub(r"^[\-\/\:]+", "", res).strip()
+        return res
 
-    # ฟังก์ชันดึงข้อความระหว่างหัวข้อ
-    def get_text_for(target_key):
-        for i, (start, end, key) in enumerate(found_anchors):
-            if key == target_key:
-                if i + 1 < len(found_anchors):
-                    next_start = found_anchors[i+1][0]
-                    return no_space_text[end:next_start]
-                else:
-                    return no_space_text[end:]
-        return ""
+    # ลำดับ Token ที่เอาไว้ใช้เป็นจุดตัดข้อความ
+    all_tokens = ["[[DATE]]", "[[DEPT]]", "[[PRAISE]]", "[[COMPLAINT]]", "[[SUGGEST]]", "[[NAME]]", "[[PHONE]]", "[[END]]"]
+
+    raw_date = get_section("[[DATE]]", all_tokens)
+    raw_dept = get_section("[[DEPT]]", all_tokens)
+    raw_praise = get_section("[[PRAISE]]", all_tokens)
+    raw_complaint = get_section("[[COMPLAINT]]", all_tokens)
+    raw_suggest = get_section("[[SUGGEST]]", all_tokens)
+    raw_name = get_section("[[NAME]]", all_tokens)
+    raw_phone = get_section("[[PHONE]]", all_tokens)
 
     # ---------------------------------------------------------
-    # สกัดข้อมูลทีละส่วน
+    # จัดระเบียบข้อมูลให้อยู่ในฟอร์แมตที่ถูกต้อง
     # ---------------------------------------------------------
-    raw_date = get_text_for("date")
-    raw_dept = get_text_for("dept")
-    raw_praise = get_text_for("praise")
-    raw_complaint = get_text_for("complaint")
-    raw_suggest = get_text_for("suggest")
-    raw_name = get_text_for("name")
-    raw_phone = get_text_for("phone")
 
     # 1. วันที่
     date_val = "-"
-    m_date = re.search(r"(\d{1,2})[/และ\-](\d{1,2})[/และ\-](20\d{2}|25\d{2})", raw_date)
-    if not m_date:
-        m_date = re.search(r"(\d{1,2})[/และ\-](\d{1,2})[/และ\-](20\d{2}|25\d{2})", no_space_text)
-        
-    if m_date:
-        d, mo, y = m_date.group(1).zfill(2), m_date.group(2).zfill(2), int(m_date.group(3))
+    dm = re.search(r"(\d{1,2})\s*[/และ\-]\s*(\d{1,2})\s*[/และ\-]\s*(20\d{2}|25\d{2})", raw_date)
+    if dm:
+        d, m, y = dm.group(1).zfill(2), dm.group(2).zfill(2), int(dm.group(3))
         if y > 2400: y -= 543
-        date_val = f"{y}-{mo}-{d}"
-
+        date_val = f"{y}-{m}-{d}"
+        
     # 2. แผนก
     dept_val = "บริการทั่วไปของโรงพยาบาล"
-    d_lower = (raw_dept + " " + no_space_text).lower()
-    if any(k in d_lower for k in ["เภสัช", "ห้องยา", "จัดยา"]): dept_val = "แผนกเภสัชกรรม/ห้องยา"
-    elif any(k in d_lower for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน", "คิดเงิน"]): dept_val = "แผนกการเงิน/ชำระเงิน"
-    elif any(k in d_lower for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]): dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
-    elif any(k in d_lower for k in ["opd", "ผู้ป่วยนอก"]): dept_val = "แผนกผู้ป่วยนอก (OPD)"
-    elif any(k in d_lower for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]): dept_val = "แผนกผู้ป่วยใน (IPD)"
-    elif any(k in d_lower for k in ["ตรวจสุขภาพ", "checkup"]): dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
-    elif any(k in d_lower for k in ["ฟัน", "ทันตกรรม"]): dept_val = "แผนกทันตกรรม"
+    d_check = (raw_dept + " " + text).replace(" ", "").lower()
+    if any(k in d_check for k in ["เภสัช", "ห้องยา", "จัดยา"]): dept_val = "แผนกเภสัชกรรม/ห้องยา"
+    elif any(k in d_check for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน"]): dept_val = "แผนกการเงิน/ชำระเงิน"
+    elif any(k in d_check for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]): dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
+    elif any(k in d_check for k in ["opd", "ผู้ป่วยนอก"]): dept_val = "แผนกผู้ป่วยนอก (OPD)"
+    elif any(k in d_check for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]): dept_val = "แผนกผู้ป่วยใน (IPD)"
+    elif any(k in d_check for k in ["ตรวจสุขภาพ", "checkup"]): dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
+    elif any(k in d_check for k in ["ฟัน", "ทันตกรรม"]): dept_val = "แผนกทันตกรรม"
 
-    # 3. เบอร์โทร
+    # 3. เบอร์ติดต่อ
     phone_val = "-"
-    p_match = re.search(r"(0[2-9]\d{7,8})", raw_phone)
-    if p_match:
-        phone_val = p_match.group(1)
+    pm = re.search(r"(0[2-9]\d{7,8})", raw_phone.replace(" ", ""))
+    if pm:
+        phone_val = pm.group(1)
     else:
-        # หาตัวเลขทั้งหน้า (ยกเว้นตัวเลขวันที่ ป้องกันการดึงเลขวันที่มาเป็นเบอร์โทร)
-        all_digits = re.sub(r"[^\d]", "", no_space_text)
+        # ค้นหาเบอร์ 10 หลักจากทั้งเอกสาร โดยป้องกันไม่ให้ดึงตัวเลขจากวันที่มาปน
+        all_nums = re.sub(r"[^\d]", "", text)
         if date_val != "-":
             y_str, m_str, d_str = date_val.split("-")
-            all_digits = all_digits.replace(f"{d_str}{m_str}{y_str}", "").replace(f"{y_str}{m_str}{d_str}", "")
-        
-        pf = re.search(r"(0[689]\d{8})", all_digits)
+            all_nums = all_nums.replace(f"{d_str}{m_str}{y_str}", "").replace(f"{y_str}{m_str}{d_str}", "")
+        pf = re.search(r"(0[689]\d{8})", all_nums)
         if pf: phone_val = pf.group(1)
 
     # 4. ชื่อลูกค้า
     name_val = "-"
-    c_name = re.sub(r"[\-\_]+", "", raw_name)
-    if len(c_name) > 1 and not any(k in c_name for k in ["ผู้ป่วย", "ญาติ", "อื่นๆ", "ผู้มาติดต่อ"]):
-        name_val = c_name
+    clean_n = raw_name.replace("-", "").strip()
+    if len(clean_n) > 1 and not any(k in clean_n for k in ["ผู้ป่วย", "ญาติ", "ติดต่อ"]):
+        name_val = clean_n
 
-    # 5. ข้อความความคิดเห็น (ดึงเฉพาะเนื้อหาจริง)
+    # 5. ข้อความความคิดเห็น
     parts = []
-    c_clean = re.sub(r"[\-\_]+", "", raw_complaint)
-    s_clean = re.sub(r"[\-\_]+", "", raw_suggest)
-    p_clean = re.sub(r"[\-\_]+", "", raw_praise)
+    c_clean = raw_complaint.replace("-", "").strip()
+    s_clean = raw_suggest.replace("-", "").strip()
+    p_clean = raw_praise.replace("-", "").strip()
 
     if c_clean: parts.append(c_clean)
-    if s_clean: parts.append(f"(ข้อเสนอแนะ:{s_clean})")
-    if not parts and p_clean: parts.append(f"[คำชม]{p_clean}")
+    if s_clean: parts.append(f"(ข้อเสนอแนะ: {s_clean})")
+    if not parts and p_clean: parts.append(f"[คำชม] {p_clean}")
 
-    feedback_text = " ".join(parts) if parts else "-"
+    feedback_text = " ".join(parts).strip() if parts else "-"
 
     return {
         "วันที่": date_val,
