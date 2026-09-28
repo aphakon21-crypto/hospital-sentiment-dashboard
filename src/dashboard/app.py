@@ -619,29 +619,29 @@ def inject_custom_css():
     .arrow-right { right: 52px; }
 
     /* แท็บเมนูหลัก */
-    /* --- สไตล์แถบ Tabs ทั้งหมด --- */
-    div[data-testid="stTabs"] div[role="tablist"] {
+    /* จัดการแถบ Tabs ทั้งหมด */
+    div[data-testid="stTabs"] [role="tablist"] {
         background-color: #070d1f !important;
         border-radius: 14px !important;
-        padding: 5px !important;
-        gap: 6px !important;
+        padding: 6px !important;
+        gap: 8px !important;
         border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        margin-bottom: 20px !important;
+        margin-bottom: 22px !important;
     }
 
-    /* ปิดเส้นใต้สีแดง/ส้ม และขอบเส้นแบ่งเดิมของ Streamlit ทั้งหมด */
-    div[data-testid="stTabs"] div[data-baseweb="tab-highlight"],
-    div[data-testid="stTabs"] div[data-baseweb="tab-border"],
-    div[data-testid="stTabs"] div[role="tablist"] > div:last-child {
+    /* ซ่อนเฉพาะเส้นขีดแดง/ส้มใต้แท็บ */
+    div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+    div[data-testid="stTabs"] [data-baseweb="tab-border"] {
         display: none !important;
+        opacity: 0 !important;
         height: 0px !important;
-        background-color: transparent !important;
+        visibility: hidden !important;
     }
 
-    /* ปุ่มแท็บสถานะปกติ */
+    /* สไตล์ปุ่มแท็บปกติ */
     div[data-testid="stTabs"] button[role="tab"] {
         border-radius: 10px !important;
-        padding: 8px 18px !important;
+        padding: 8px 20px !important;
         border: none !important;
         background-color: transparent !important;
         transition: all 0.2s ease !important;
@@ -651,13 +651,13 @@ def inject_custom_css():
     div[data-testid="stTabs"] button[role="tab"] span {
         color: #94a3b8 !important;
         font-weight: 600 !important;
-        font-size: 14.5px !important;
+        font-size: 14px !important;
     }
 
-    /* ปุ่มแท็บเมื่อถูกเลือก (Active Tab) -> กล่องปุ่มมนสีฟ้า */
+    /* สไตล์ปุ่มแท็บเมื่อถูกเลือก (Active Tab) -> กล่องสีฟ้า */
     div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
         background-color: #0284c7 !important;
-        box-shadow: 0 4px 12px rgba(2, 132, 199, 0.45) !important;
+        box-shadow: 0 4px 14px rgba(2, 132, 199, 0.45) !important;
     }
 
     div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p,
@@ -1836,7 +1836,7 @@ def render_aspect_analytics_section():
             )
             st.plotly_chart(fig_radar, use_container_width=True, key="chart_aspect_radar")
 
-    # ------------------ แท็บ 2: HEATMAP ------------------
+    # ------------------ แท็บ 2: HEATMAP (คงไว้เพียงชุดเดียว) ------------------
     with tab_heatmap:
         z_data = [scores_matrix[d] for d in all_departments]
         fig_heat = px.imshow(
