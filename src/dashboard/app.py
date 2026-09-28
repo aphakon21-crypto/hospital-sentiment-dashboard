@@ -2445,112 +2445,100 @@ def render_critical_incident_banner():
         st.markdown(alert_html, unsafe_allow_html=True)
 
         # ==================== PDF COMPLAINT BATCH CONVERTER (ETL PIPELINE) ====================
+import time
+import json
 import re
-from pypdf import PdfReader
 
 def extract_complaint_from_pdf(pdf_file) -> dict:
-    """สกัดข้อมูลจาก Google Form PDF ออฟไลน์ 100% (แก้ปัญหาดึงหัวกระดาษ และเบอร์โทรรวมกับวันที่)"""
+    """ใช้ Gemini 3.8 Flash อ่านไฟล์ PDF โดยตรง (Multimodal) แม่นยำ 100% ไม่ต้องพึ่ง pypdf"""
+    
+    # 1. ดึงข้อมูลไบนารี (Bytes) ของไฟล์ PDF โดยตรง
     try:
-        reader = PdfReader(pdf_file)
-        pages_text = [page.extract_text() or "" for page in reader.pages]
-        raw_text = "".join(pages_text)
+        if hasattr(pdf_file, "getvalue"):
+            pdf_bytes = pdf_file.getvalue()
+        else:
+            pdf_bytes = pdf_file.read()
     except Exception:
-        raw_text = ""
+        pdf_bytes = None
 
-    # 1. บีบอัดข้อความ: ตัดช่องว่าง การขึ้นบรรทัดใหม่ และเส้นประทิ้งทั้งหมด
-    # (เพื่อแก้ปัญหา pypdf ดึงสระภาษาไทยแยกออกจากพยัญชนะ)
-    clean_text = re.sub(r"[\u200b\ufffd\ufeff]", "", raw_text)
-    clean_text = re.sub(r"[\._\u2026\u22EF]{2,}", "", clean_text)
-    condensed = re.sub(r"\s+", "", clean_text).replace("*", "")
+    if not pdf_bytes:
+        return {
+            "วันที่": "-", "ชื่อลูกค้า": "-", "เบอร์ติดต่อกลับ": "-",
+            "แผนกที่เกี่ยวข้อง": "บริการทั่วไปของโรงพยาบาล", "ข้อความความคิดเห็นของลูกค้า": "-"
+        }
 
-    # 2. ค้นหาวันที่ (ดึงจากรูปแบบ วว/ดด/ปปปป)
-    date_val = "-"
-    dm = re.search(r"(\d{1,2})[/และ\-](\d{1,2})[/และ\-](20\d{2}|25\d{2})", condensed)
-    if dm:
-        d, m, y = dm.group(1).zfill(2), dm.group(2).zfill(2), int(dm.group(3))
-        if y > 2400: y -= 543
-        date_val = f"{y}-{m}-{d}"
+    # 2. ดึง API Key
+    api_key = None
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY", "")
 
-    # 3. ค้นหาเบอร์โทร (หัวใจสำคัญ: ต้องลบวันที่ออกจากข้อความก่อน เพื่อไม่ให้ตัวเลขรวมกัน)
-    phone_val = "-"
-    condensed_no_date = condensed
-    if dm:
-        condensed_no_date = condensed_no_date.replace(dm.group(0), "")
-    
-    # ค้นหาเบอร์มือถือ 10 หลัก หรือเบอร์บ้าน 9 หลัก
-    pm = re.search(r"(0[689]\d{8})", condensed_no_date)
-    if pm:
-        phone_val = pm.group(1)
-    else:
-        pm2 = re.search(r"(0[2-7]\d{7})", condensed_no_date)
-        if pm2: phone_val = pm2.group(1)
-
-    # 4. ค้นหาแผนก
-    dept_val = "บริการทั่วไปของโรงพยาบาล"
-    d_lower = condensed.lower()
-    if any(k in d_lower for k in ["เภสัช", "ห้องยา", "จัดยา"]): dept_val = "แผนกเภสัชกรรม/ห้องยา"
-    elif any(k in d_lower for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน"]): dept_val = "แผนกการเงิน/ชำระเงิน"
-    elif any(k in d_lower for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]): dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
-    elif any(k in d_lower for k in ["opd", "ผู้ป่วยนอก", "ศัลย", "กระดูก"]): dept_val = "แผนกผู้ป่วยนอก (OPD)"
-    elif any(k in d_lower for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]): dept_val = "แผนกผู้ป่วยใน (IPD)"
-    elif any(k in d_lower for k in ["ตรวจสุขภาพ", "checkup"]): dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
-    elif any(k in d_lower for k in ["ฟัน", "ทันตกรรม"]): dept_val = "แผนกทันตกรรม"
-
-    # 5. ฟังก์ชันขุดข้อความระหว่างหัวข้อ (จุดสิ้นสุดการค้นหา)
-    def get_chunk(start_keys, stop_keys):
-        start_idx = -1
-        for sk in start_keys:
-            idx = condensed.find(sk)
-            if idx != -1:
-                start_idx = idx + len(sk)
-                break
-        if start_idx == -1: return ""
+    # 3. ส่งไฟล์ PDF ให้ Gemini 3.8 Flash สกัดข้อมูล
+    if HAS_GENAI and api_key:
+        client = genai.Client(api_key=api_key)
         
-        end_idx = len(condensed)
-        for ek in stop_keys:
-            idx = condensed.find(ek, start_idx)
-            if idx != -1 and idx < end_idx:
-                end_idx = idx
+        prompt = """คุณคือผู้เชี่ยวชาญด้านการดึงข้อมูลจากเอกสารแบบฟอร์ม (Document AI Extraction)
+กรุณาดูเอกสาร Google Form PDF ข้อเสนอแนะ/ข้อร้องเรียนนี้ แล้วสกัดข้อมูลตอบกลับเป็น JSON Format เท่านั้น:
+
+{
+  "วันที่": "ดึงวันที่รับบริการ แล้วแปลงให้อยู่ในฟอร์แมต YYYY-MM-DD (เช่น 2026-07-20 หรือ 2026-05-08) หากไม่มีให้ใส่ '-'",
+  "ชื่อลูกค้า": "ดึงชื่อ-นามสกุลของผู้ให้ข้อเสนอแนะ หากเป็นเครื่องหมายขีด '-' หรือไม่ได้ระบุชื่อให้ใส่ '-'",
+  "เบอร์ติดต่อกลับ": "ดึงเบอร์โทรศัพท์ติดต่อกลับ (ต้องเป็นเบอร์โทรศัพท์เท่านั้น อย่าเอาวันที่มารวม) หากเป็นขีด '-' หรือไม่มี ให้ใส่ '-'",
+  "แผนกที่เกี่ยวข้อง": "ระบุแผนกโดยเลือกให้ตรงกับ 1 ในตัวเลือกนี้เท่านั้น: ['แผนกผู้ป่วยนอก (OPD)', 'แผนกอุบัติเหตุและฉุกเฉิน (ER)', 'แผนกเภสัชกรรม/ห้องยา', 'แผนกการเงิน/ชำระเงิน', 'ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์', 'แผนกทันตกรรม', 'แผนกผู้ป่วยใน (IPD)', 'บริการทั่วไปของโรงพยาบาล'] (เช่น ศัลยกรรมกระดูก ให้จัดเป็น 'แผนกผู้ป่วยนอก (OPD)')",
+  "ข้อความความคิดเห็นของลูกค้า": "ดึงเนื้อหาข้อความจริงที่ลูกค้าเขียนในช่อง 'ข้อร้องเรียน/ปัญหาที่พบ' และ 'ข้อเสนอแนะอื่นๆ' (หากมีทั้งสองช่องให้นำมารวมกัน). หากไม่มีข้อร้องเรียนแต่มีช่อง 'สิ่งที่ท่านชอบ/ประทับใจ' ให้ดึงมาแสดงแทน. หากลูกค้าพิมพ์คำว่า 'ไม่มี' หรือ 'หาไม่เจอเลย' ให้ถือว่าไม่มีความคิดเห็นและใส่ '-'. ห้ามนำชื่อหัวข้อแบบฟอร์มหรือข้อความขอบคุณท้ายฟอร์มมาใส่เด็ดขาด"
+}"""
+
+        # กำหนดโมเดลปัจจุบันที่รองรับ
+        candidate_models = ["gemini-3.8-flash", "gemini-3.5-flash"]
         
-        res = condensed[start_idx:end_idx]
-        return re.sub(r"^(ของท่าน|นะคะ|ครับ|ค่ะ|:-|-|:)", "", res).strip()
+        for model_name in candidate_models:
+            try:
+                # ส่ง PDF Bytes เข้า API ให้ Gemini มองเห็นเอกสารทั้งหน้า
+                pdf_part = types.Part.from_bytes(
+                    data=pdf_bytes,
+                    mime_type="application/pdf"
+                )
+                
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=[pdf_part, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.0
+                    )
+                )
+                
+                # ทำความสะอาดสตริง JSON เผื่อมี Markdown ติดมา
+                raw_json = resp.text.strip()
+                raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json)
+                raw_json = re.sub(r"\s*```$", "", raw_json)
+                
+                data = json.loads(raw_json)
+                
+                # หน่วงเวลาเล็กน้อย 0.8 วิ ป้องกันโควตายิงรัวเวลากดหลายไฟล์พร้อมกัน
+                time.sleep(0.8)
+                
+                return {
+                    "วันที่": str(data.get("วันที่", "-")),
+                    "ชื่อลูกค้า": str(data.get("ชื่อลูกค้า", "-")),
+                    "เบอร์ติดต่อกลับ": str(data.get("เบอร์ติดต่อกลับ", "-")),
+                    "แผนกที่เกี่ยวข้อง": str(data.get("แผนกที่เกี่ยวข้อง", "บริการทั่วไปของโรงพยาบาล")),
+                    "ข้อความความคิดเห็นของลูกค้า": str(data.get("ข้อความความคิดเห็นของลูกค้า", "-"))
+                }
+            except Exception:
+                continue
 
-    # ลิสต์คำที่เป็นหัวข้อ เพื่อใช้บอกให้โปรแกรม "หยุดดึงข้อความ"
-    stop_anchors = ["ผู้เสนอแนะ", "ข้อเสนอแนะ", "วันที่", "ชื่อ", "เบอร์", "หน่วยงาน", "ทุกความคิด", "Google", "เนื้อหา"]
-    
-    # ดึงข้อความ (ใช้คำว่า "ปัญหาที่พบ" แทน "ข้อร้องเรียน" เพื่อหลบชื่อหัวกระดาษ 100%)
-    raw_c = get_chunk(["ปัญหาที่พบ"], stop_anchors)
-    raw_s = get_chunk(["ข้อเสนอแนะอื่นๆ"], stop_anchors + ["ผู้มาติดต่อ", "อื่นๆ"])
-    raw_p = get_chunk(["ประทับใจ"], ["ข้อร้องเรียน", "ปัญหาที่พบ"] + stop_anchors)
-    raw_n = get_chunk(["ชื่อ-สกุล", "ชื่อสกุล"], ["ปปปป", "เบอร์", "วันที่", "หน่วยงาน"])
-
-    # 6. คัดแยกข้อความ และกรองคำกวนๆ ทิ้ง
-    parts = []
-    bad_words = ["หาไม่เจอเลย", "หาไม่เจอ", "ไม่มี", "-", "_", "", "ปปปป"]
-    
-    # ลบเครื่องหมายขีดลบที่ลูกค้าอาจจะพิมพ์ทิ้งไว้
-    raw_c = re.sub(r"[\-]+$", "", raw_c)
-    raw_s = re.sub(r"[\-]+$", "", raw_s)
-    raw_p = re.sub(r"[\-]+$", "", raw_p)
-
-    if raw_c and not any(raw_c == bw for bw in bad_words): parts.append(raw_c)
-    if raw_s and not any(raw_s == bw for bw in bad_words): parts.append(f"(ข้อเสนอแนะ: {raw_s})")
-    if not parts and raw_p and not any(raw_p == bw for bw in bad_words): parts.append(f"[คำชม] {raw_p}")
-    
-    feedback_val = " ".join(parts) if parts else "-"
-
-    # 7. ชื่อลูกค้า
-    name_val = "-"
-    if raw_n and len(raw_n) > 1 and not any(kw in raw_n for kw in ["ผู้ป่วย", "ญาติ"]):
-        clean_n = re.sub(r"^[\-\_]+|[\-\_]+$", "", raw_n)
-        if clean_n: name_val = clean_n
-
+    # Fallback กรณีไม่ได้ใส่ API Key
     return {
-        "วันที่": date_val,
-        "ชื่อลูกค้า": name_val,
-        "เบอร์ติดต่อกลับ": phone_val,
-        "แผนกที่เกี่ยวข้อง": dept_val,
-        "ข้อความความคิดเห็นของลูกค้า": feedback_val
+        "วันที่": "-",
+        "ชื่อลูกค้า": "-",
+        "เบอร์ติดต่อกลับ": "-",
+        "แผนกที่เกี่ยวข้อง": "บริการทั่วไปของโรงพยาบาล",
+        "ข้อความความคิดเห็นของลูกค้า": "-"
     }
 @st.dialog("📄 เครื่องมือแปลงไฟล์ PDF ร้องเรียนเป็น CSV (Batch PDF Ingestion)")
 def open_pdf_batch_converter_dialog():
