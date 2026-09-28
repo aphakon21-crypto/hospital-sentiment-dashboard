@@ -2446,110 +2446,91 @@ def render_critical_incident_banner():
 
         # ==================== PDF COMPLAINT BATCH CONVERTER (ETL PIPELINE) ====================
 
+import time
+
 def extract_complaint_from_pdf(pdf_file) -> dict:
-    """สกัดข้อมูลจาก Google Form PDF (แก้ปัญหา pypdf แยกสระและลำดับบรรทัดเพี้ยน 100%)"""
+    """ไพ่ตาย: ใช้ Gemini AI สกัดข้อมูลจาก PDF โดยตรง แก้ปัญหาสระแตกและสลับบรรทัดแบบ 100%"""
+    
+    # 1. ใช้ pypdf ดึงข้อความมาแบบดิบๆ (ไม่ต้องสนใจว่ามันจะสลับบรรทัด หรือเว้นวรรคมั่วแค่ไหน)
     try:
         reader = PdfReader(pdf_file)
         pages_text = [page.extract_text() or "" for page in reader.pages]
-        raw_text = "".join(pages_text)
+        raw_text = "\n".join(pages_text)
     except Exception:
         raw_text = ""
+        
+    # 2. ดึง API Key จาก Secrets
+    api_key = None
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY", "")
 
-    # 1. บีบอัดข้อความ: ลบช่องว่าง บรรทัดใหม่ อักขระขยะ และเส้นประทิ้งทั้งหมด
+    # 3. ให้ Gemini AI ทำหน้าที่เป็น Data Extractor (สกัดและจัดระเบียบข้อมูล)
+    if HAS_GENAI and api_key and raw_text.strip():
+        try:
+            client = genai.Client(api_key=api_key)
+            # Prompt สั่งการให้ AI ค้นหาและกรองข้อมูลให้ตรงเป๊ะ
+            prompt = f"""คุณคือผู้เชี่ยวชาญด้าน Data Extraction
+จงอ่านข้อความที่ถูกดึงมาจากแบบฟอร์ม PDF ต่อไปนี้ (ข้อความอาจมีสระภาษาไทยที่แตกแยกกัน หรือบรรทัดสลับกัน ให้คุณทำความเข้าใจเนื้อหาจากบริบท)
+
+ข้อความ:
+'''{raw_text}'''
+
+จงสกัดข้อมูลแล้วตอบกลับเป็น JSON Format เท่านั้น โดยมี Key ดังนี้:
+{{
+    "วันที่": "ค้นหาวันที่รับบริการ แปลงเป็นรูปแบบ YYYY-MM-DD (เช่น 2026-07-20) ถ้าหาไม่เจอให้ใส่ '-'",
+    "ชื่อลูกค้า": "ดึงชื่อ-สกุลของลูกค้า หากไม่มี, หรือพิมพ์แค่ผู้ป่วย/ญาติ หรือเป็นเครื่องหมายขีด ให้ใส่ '-'",
+    "เบอร์ติดต่อกลับ": "ดึงเฉพาะหมายเลขโทรศัพท์ 9-10 หลัก (วิเคราะห์แยกออกจากวันที่ให้ถูกต้อง) ถ้าไม่มีให้ใส่ '-'",
+    "แผนกที่เกี่ยวข้อง": "วิเคราะห์จากข้อความแล้วจับคู่แผนกให้ตรงกับหมวดหมู่นี้: 'แผนกผู้ป่วยนอก (OPD)', 'แผนกอุบัติเหตุและฉุกเฉิน (ER)', 'แผนกเภสัชกรรม/ห้องยา', 'แผนกการเงิน/ชำระเงิน', 'ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์' หรือถ้าไม่เข้าพวกเลยให้ใส่ 'บริการทั่วไปของโรงพยาบาล'",
+    "ข้อความความคิดเห็นของลูกค้า": "ดึงเฉพาะ 'ข้อร้องเรียน' หรือ 'ข้อเสนอแนะ' (ถ้ามีทั้งคู่ให้เขียนรวมกัน) หากไม่มีความเห็นให้ดึง 'สิ่งที่ประทับใจ' มาแทน. ห้ามนำชื่อหัวข้อ หรือประโยคท้ายฟอร์มมาใส่เด็ดขาด และถ้าลูกค้าตอบว่า 'ไม่มี', 'หาไม่เจอ' ให้ข้ามไป ถือว่าไม่มีความคิดเห็น (ให้ใส่ '-')"
+}}"""
+            
+            # ใช้รุ่น Flash เพื่อความรวดเร็วในการประมวลผลทีละหลายๆ ไฟล์
+            candidate_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-1.5-flash"]
+            for m in candidate_models:
+                try:
+                    resp = client.models.generate_content(
+                        model=m,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.0
+                        )
+                    )
+                    parsed = json.loads(resp.text.strip())
+                    
+                    # หน่วงเวลาเล็กน้อยป้องกัน API Limit เวลากดอัปโหลดแบบ Bulk
+                    time.sleep(0.5) 
+                    
+                    return {
+                        "วันที่": parsed.get("วันที่", "-"),
+                        "ชื่อลูกค้า": parsed.get("ชื่อลูกค้า", "-"),
+                        "เบอร์ติดต่อกลับ": parsed.get("เบอร์ติดต่อกลับ", "-"),
+                        "แผนกที่เกี่ยวข้อง": parsed.get("แผนกที่เกี่ยวข้อง", "บริการทั่วไปของโรงพยาบาล"),
+                        "ข้อความความคิดเห็นของลูกค้า": parsed.get("ข้อความความคิดเห็นของลูกค้า", "-")
+                    }
+                except Exception:
+                    continue
+        except Exception as e:
+            pass
+
+    # === 4. Fallback แบบพื้นฐาน (กรณีเน็ตหลุด หรือ API Error) ===
     condensed = re.sub(r"[\s\u200B\uFEFF\uFFFD\*\_\.]", "", raw_text)
-
-    # 2. วันที่รับบริการ (ดึงจาก Pattern วันที่ตรงๆ ไม่พึ่งพาหัวข้อ)
-    date_val = "-"
-    # ค้นหาวันที่รูปแบบ 20/07/2026
-    dm = re.search(r"(\d{1,2})[/และ\-](\d{1,2})[/และ\-](20\d{2}|25\d{2})", raw_text)
-    if not dm:
-        dm = re.search(r"(\d{1,2})[/และ\-](\d{1,2})[/และ\-](20\d{2}|25\d{2})", condensed)
-        
-    if dm:
-        d, mo, y = dm.group(1).zfill(2), dm.group(2).zfill(2), int(dm.group(3))
-        if y > 2400: y -= 543
-        date_val = f"{y}-{mo}-{d}"
-
-    # 3. แผนก (ค้นหา Keyword จากข้อความทั้งหมด)
-    dept_val = "บริการทั่วไปของโรงพยาบาล"
-    d_check = condensed.lower()
-    if any(k in d_check for k in ["เภสัช", "ห้องยา", "จัดยา"]): dept_val = "แผนกเภสัชกรรม/ห้องยา"
-    elif any(k in d_check for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน"]): dept_val = "แผนกการเงิน/ชำระเงิน"
-    elif any(k in d_check for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]): dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
-    elif any(k in d_check for k in ["opd", "ผู้ป่วยนอก", "ศัลย", "กระดูก"]): dept_val = "แผนกผู้ป่วยนอก (OPD)"
-    elif any(k in d_check for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]): dept_val = "แผนกผู้ป่วยใน (IPD)"
-    elif any(k in d_check for k in ["ตรวจสุขภาพ", "checkup"]): dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
-    elif any(k in d_check for k in ["ฟัน", "ทันตกรรม"]): dept_val = "แผนกทันตกรรม"
-
-    # 4. เบอร์โทรศัพท์ (ค้นหาตัวเลข 10 หลักโดยไม่เอาวันที่มารวม)
-    phone_val = "-"
-    all_digits = re.sub(r"[^\d]", "", condensed)
-    if date_val != "-":
-        y_str, m_str, d_str = date_val.split("-")
-        all_digits = all_digits.replace(f"{d_str}{m_str}{y_str}", "").replace(f"{y_str}{m_str}{d_str}", "")
-        
-    pf = re.search(r"(0[689]\d{8})", all_digits)
-    if pf: 
-        phone_val = pf.group(1)
-    else:
-        pf2 = re.search(r"(0[2-7]\d{7})", all_digits)
-        if pf2: phone_val = pf2.group(1)
-
-    # 5. ฟังก์ชันสกัดข้อความระหว่างหัวข้อ (ทำบนข้อความที่ไม่มีช่องว่าง)
-    def get_between(text, start_keys, end_keys):
-        start_pos = -1
-        for sk in start_keys:
-            idx = text.find(sk)
-            if idx != -1:
-                start_pos = idx + len(sk)
-                break
-        if start_pos == -1: return ""
-        
-        sub = text[start_pos:]
-        end_pos = len(sub)
-        for ek in end_keys:
-            idx = sub.find(ek)
-            if idx != -1 and idx < end_pos:
-                end_pos = idx
-        return sub[:end_pos]
-
-    # ดึงข้อความดิบ
-    raw_praise = get_between(condensed, ["สิ่งที่ท่านชอบ/ประทับใจ", "สิ่งที่ท่านชอบ"], ["ข้อร้องเรียน", "ปัญหาที่พบ", "ผู้เสนอแนะ", "ชื่อ", "วันที่"])
-    raw_complaint = get_between(condensed, ["ข้อร้องเรียน/ปัญหาที่พบ", "ข้อร้องเรียน", "ปัญหาที่พบ"], ["ผู้เสนอแนะ", "ข้อเสนอแนะ", "ชื่อ", "วันที่", "ผู้ป่วย", "ญาติ"])
-    raw_suggest = get_between(condensed, ["ข้อเสนอแนะอื่นๆ", "ข้อเสนอแนะ"], ["ผู้มาติดต่อ", "ผู้มาคิดต่อ", "อื่นๆ", "วันที่", "ชื่อ", "เบอร์โทร"])
-    raw_name = get_between(condensed, ["ชื่อ-สกุล", "ชื่อสกุล"], ["ปปปป", "เบอร์โทรศัพท์", "หน่วยงาน", "วันที่"])
+    dept = "บริการทั่วไปของโรงพยาบาล"
+    if "เภสัช" in condensed or "ห้องยา" in condensed or "จัดยา" in condensed: dept = "แผนกเภสัชกรรม/ห้องยา"
+    elif "การเงิน" in condensed or "ชำระเงิน" in condensed: dept = "แผนกการเงิน/ชำระเงิน"
+    elif "ศัลย" in condensed or "กระดูก" in condensed: dept = "แผนกผู้ป่วยนอก (OPD)"
     
-    # 6. คัดกรองและประกอบข้อความความคิดเห็น
-    parts = []
-    bad_words = ["หาไม่เจอเลย", "หาไม่เจอ", "ไม่มี", "-", "_"] # คำกวนๆ หรือคำที่ไม่เป็นประโยชน์จะถูกกรองทิ้ง
-    
-    c_clean = re.sub(r"^[\-\:\/]+", "", raw_complaint)
-    if c_clean and not any(c_clean == bw for bw in bad_words):
-        parts.append(c_clean)
-        
-    s_clean = re.sub(r"^[\-\:\/]+", "", raw_suggest)
-    if s_clean and not any(s_clean == bw for bw in bad_words):
-        parts.append(f"(ข้อเสนอแนะ:{s_clean})")
-        
-    if not parts:
-        p_clean = re.sub(r"^[\-\:\/]+", "", raw_praise)
-        if p_clean and not any(p_clean == bw for bw in bad_words):
-            parts.append(f"[คำชม]{p_clean}")
-
-    feedback_text = " ".join(parts) if parts else "-"
-
-    # 7. ชื่อลูกค้า
-    name_val = "-"
-    n_clean = re.sub(r"[\-\:]+", "", raw_name)
-    if len(n_clean) > 1 and not any(kw in n_clean for kw in ["ผู้ป่วย", "ญาติ"]):
-        name_val = n_clean
-
     return {
-        "วันที่": date_val,
-        "ชื่อลูกค้า": name_val,
-        "เบอร์ติดต่อกลับ": phone_val,
-        "แผนกที่เกี่ยวข้อง": dept_val,
-        "ข้อความความคิดเห็นของลูกค้า": feedback_text
+        "วันที่": "-",
+        "ชื่อลูกค้า": "-",
+        "เบอร์ติดต่อกลับ": "-",
+        "แผนกที่เกี่ยวข้อง": dept,
+        "ข้อความความคิดเห็นของลูกค้า": "-"
     }
 @st.dialog("📄 เครื่องมือแปลงไฟล์ PDF ร้องเรียนเป็น CSV (Batch PDF Ingestion)")
 def open_pdf_batch_converter_dialog():
