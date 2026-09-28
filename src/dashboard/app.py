@@ -2445,9 +2445,11 @@ def render_critical_incident_banner():
         st.markdown(alert_html, unsafe_allow_html=True)
 
         # ==================== PDF COMPLAINT BATCH CONVERTER (ETL PIPELINE) ====================
+import re
+from pypdf import PdfReader
 
 def extract_complaint_from_pdf(pdf_file) -> dict:
-    """สกัดข้อมูลออฟไลน์ 100% ไม่ใช้ API ป้องกันปัญหา Rate Limit ถอดรหัสสระแยกได้สมบูรณ์แบบ"""
+    """สกัดข้อมูลจาก Google Form PDF ออฟไลน์ 100% (แก้ปัญหาดึงหัวกระดาษ และเบอร์โทรรวมกับวันที่)"""
     try:
         reader = PdfReader(pdf_file)
         pages_text = [page.extract_text() or "" for page in reader.pages]
@@ -2455,89 +2457,93 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
     except Exception:
         raw_text = ""
 
-    # 1. บีบอัดข้อความ: ตัดช่องว่าง การขึ้นบรรทัดใหม่ และอักขระขยะทิ้งทั้งหมด
-    # (ภาษาไทยถึงเขียนติดกันก็สามารถอ่านรู้เรื่อง และระบบวิเคราะห์ความรู้สึกทำงานได้ปกติ)
-    no_space = re.sub(r"[\s\uFFFD\u200B\uFEFF\*\_\.]", "", raw_text)
-    no_space = re.sub(r"[\-\_]{2,}", "", no_space)
+    # 1. บีบอัดข้อความ: ตัดช่องว่าง การขึ้นบรรทัดใหม่ และเส้นประทิ้งทั้งหมด
+    # (เพื่อแก้ปัญหา pypdf ดึงสระภาษาไทยแยกออกจากพยัญชนะ)
+    clean_text = re.sub(r"[\u200b\ufffd\ufeff]", "", raw_text)
+    clean_text = re.sub(r"[\._\u2026\u22EF]{2,}", "", clean_text)
+    condensed = re.sub(r"\s+", "", clean_text).replace("*", "")
 
-    # 2. วันที่
+    # 2. ค้นหาวันที่ (ดึงจากรูปแบบ วว/ดด/ปปปป)
     date_val = "-"
-    d_match = re.search(r"(\d{1,2})[/และ\-](\d{1,2})[/และ\-](20\d{2}|25\d{2})", no_space)
-    if d_match:
-        d, m, y = d_match.group(1).zfill(2), d_match.group(2).zfill(2), int(d_match.group(3))
+    dm = re.search(r"(\d{1,2})[/และ\-](\d{1,2})[/และ\-](20\d{2}|25\d{2})", condensed)
+    if dm:
+        d, m, y = dm.group(1).zfill(2), dm.group(2).zfill(2), int(dm.group(3))
         if y > 2400: y -= 543
         date_val = f"{y}-{m}-{d}"
 
-    # 3. แผนก
-    dept_val = "บริการทั่วไปของโรงพยาบาล"
-    n_low = no_space.lower()
-    if any(k in n_low for k in ["เภสัช", "ห้องยา", "จัดยา"]): dept_val = "แผนกเภสัชกรรม/ห้องยา"
-    elif any(k in n_low for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน"]): dept_val = "แผนกการเงิน/ชำระเงิน"
-    elif any(k in n_low for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]): dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
-    elif any(k in n_low for k in ["opd", "ผู้ป่วยนอก", "ศัลย", "กระดูก"]): dept_val = "แผนกผู้ป่วยนอก (OPD)"
-    elif any(k in n_low for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]): dept_val = "แผนกผู้ป่วยใน (IPD)"
-    elif any(k in n_low for k in ["ตรวจสุขภาพ", "checkup"]): dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
-    elif any(k in n_low for k in ["ฟัน", "ทันตกรรม"]): dept_val = "แผนกทันตกรรม"
-
-    # 4. เบอร์โทร (ป้องกันเอาตัวเลขวันที่มาเป็นเบอร์)
+    # 3. ค้นหาเบอร์โทร (หัวใจสำคัญ: ต้องลบวันที่ออกจากข้อความก่อน เพื่อไม่ให้ตัวเลขรวมกัน)
     phone_val = "-"
-    all_nums = re.sub(r"[^\d]", "", no_space)
-    if date_val != "-":
-        y_str, m_str, d_str = date_val.split("-")
-        all_nums = all_nums.replace(f"{d_str}{m_str}{y_str}", "").replace(f"{y_str}{m_str}{d_str}", "")
+    condensed_no_date = condensed
+    if dm:
+        condensed_no_date = condensed_no_date.replace(dm.group(0), "")
     
-    p_match = re.search(r"(0[689]\d{8})", all_nums)
-    if p_match:
-        phone_val = p_match.group(1)
+    # ค้นหาเบอร์มือถือ 10 หลัก หรือเบอร์บ้าน 9 หลัก
+    pm = re.search(r"(0[689]\d{8})", condensed_no_date)
+    if pm:
+        phone_val = pm.group(1)
+    else:
+        pm2 = re.search(r"(0[2-7]\d{7})", condensed_no_date)
+        if pm2: phone_val = pm2.group(1)
 
-    # 5. ฟังก์ชันขุดข้อความระหว่างหัวข้อ
-    def get_text_between(text, start_words, end_words):
+    # 4. ค้นหาแผนก
+    dept_val = "บริการทั่วไปของโรงพยาบาล"
+    d_lower = condensed.lower()
+    if any(k in d_lower for k in ["เภสัช", "ห้องยา", "จัดยา"]): dept_val = "แผนกเภสัชกรรม/ห้องยา"
+    elif any(k in d_lower for k in ["การเงิน", "แคชเชียร์", "ชำระเงิน"]): dept_val = "แผนกการเงิน/ชำระเงิน"
+    elif any(k in d_lower for k in ["er", "ฉุกเฉิน", "อุบัติเหตุ"]): dept_val = "แผนกอุบัติเหตุและฉุกเฉิน (ER)"
+    elif any(k in d_lower for k in ["opd", "ผู้ป่วยนอก", "ศัลย", "กระดูก"]): dept_val = "แผนกผู้ป่วยนอก (OPD)"
+    elif any(k in d_lower for k in ["ipd", "ผู้ป่วยใน", "วอร์ด", "ห้องพัก"]): dept_val = "แผนกผู้ป่วยใน (IPD)"
+    elif any(k in d_lower for k in ["ตรวจสุขภาพ", "checkup"]): dept_val = "ศูนย์ตรวจสุขภาพและอาชีวเวชศาสตร์"
+    elif any(k in d_lower for k in ["ฟัน", "ทันตกรรม"]): dept_val = "แผนกทันตกรรม"
+
+    # 5. ฟังก์ชันขุดข้อความระหว่างหัวข้อ (จุดสิ้นสุดการค้นหา)
+    def get_chunk(start_keys, stop_keys):
         start_idx = -1
-        for sw in start_words:
-            idx = text.find(sw)
+        for sk in start_keys:
+            idx = condensed.find(sk)
             if idx != -1:
-                start_idx = idx + len(sw)
+                start_idx = idx + len(sk)
                 break
         if start_idx == -1: return ""
         
-        sub = text[start_idx:]
-        end_idx = len(sub)
-        for ew in end_words:
-            idx = sub.find(ew)
+        end_idx = len(condensed)
+        for ek in stop_keys:
+            idx = condensed.find(ek, start_idx)
             if idx != -1 and idx < end_idx:
                 end_idx = idx
         
-        res = sub[:end_idx]
-        # ทำความสะอาดหัวข้อที่ติดมา
-        res = re.sub(r"^([\/\-\:]|ปัญหาที่พบ|อื่นๆ|ของท่าน)+", "", res)
-        return res.strip()
+        res = condensed[start_idx:end_idx]
+        return re.sub(r"^(ของท่าน|นะคะ|ครับ|ค่ะ|:-|-|:)", "", res).strip()
 
-    # ลิสต์จุดตัดที่จะหยุดดึงข้อความ
-    stop_words = [
-        "ข้อร้องเรียน", "ปัญหาที่พบ", "ข้อเสนอแนะ", "ชื่อสกุล", "ชื่อ-สกุล",
-        "เบอร์โทร", "วันที่รับบริการ", "หน่วยงาน", "ผู้เสนอแนะ", "ผู้ป่วย",
-        "ญาติ", "รับบริการ", "ทุกความคิดเห็น", "Google", "เนื้อหานี้", "ปปปป"
-    ]
-
-    raw_c = get_text_between(no_space, ["ข้อร้องเรียน/ปัญหาที่พบ", "ข้อร้องเรียน", "ปัญหาที่พบ"], stop_words)
-    raw_s = get_text_between(no_space, ["ข้อเสนอแนะอื่นๆ", "ข้อเสนอแนะ"], stop_words)
-    raw_p = get_text_between(no_space, ["สิ่งที่ท่านชอบ/ประทับใจ", "สิ่งที่ท่านชอบ"], stop_words)
-    raw_n = get_text_between(no_space, ["ชื่อ-สกุล", "ชื่อสกุล"], stop_words)
+    # ลิสต์คำที่เป็นหัวข้อ เพื่อใช้บอกให้โปรแกรม "หยุดดึงข้อความ"
+    stop_anchors = ["ผู้เสนอแนะ", "ข้อเสนอแนะ", "วันที่", "ชื่อ", "เบอร์", "หน่วยงาน", "ทุกความคิด", "Google", "เนื้อหา"]
+    
+    # ดึงข้อความ (ใช้คำว่า "ปัญหาที่พบ" แทน "ข้อร้องเรียน" เพื่อหลบชื่อหัวกระดาษ 100%)
+    raw_c = get_chunk(["ปัญหาที่พบ"], stop_anchors)
+    raw_s = get_chunk(["ข้อเสนอแนะอื่นๆ"], stop_anchors + ["ผู้มาติดต่อ", "อื่นๆ"])
+    raw_p = get_chunk(["ประทับใจ"], ["ข้อร้องเรียน", "ปัญหาที่พบ"] + stop_anchors)
+    raw_n = get_chunk(["ชื่อ-สกุล", "ชื่อสกุล"], ["ปปปป", "เบอร์", "วันที่", "หน่วยงาน"])
 
     # 6. คัดแยกข้อความ และกรองคำกวนๆ ทิ้ง
     parts = []
-    bad_words = ["หาไม่เจอเลย", "หาไม่เจอ", "ไม่มี", "ไม่", "-", "_", ""]
+    bad_words = ["หาไม่เจอเลย", "หาไม่เจอ", "ไม่มี", "-", "_", "", "ปปปป"]
     
+    # ลบเครื่องหมายขีดลบที่ลูกค้าอาจจะพิมพ์ทิ้งไว้
+    raw_c = re.sub(r"[\-]+$", "", raw_c)
+    raw_s = re.sub(r"[\-]+$", "", raw_s)
+    raw_p = re.sub(r"[\-]+$", "", raw_p)
+
     if raw_c and not any(raw_c == bw for bw in bad_words): parts.append(raw_c)
-    if raw_s and not any(raw_s == bw for bw in bad_words): parts.append(f"(ข้อเสนอแนะ:{raw_s})")
-    if not parts and raw_p and not any(raw_p == bw for bw in bad_words): parts.append(f"[คำชม]{raw_p}")
+    if raw_s and not any(raw_s == bw for bw in bad_words): parts.append(f"(ข้อเสนอแนะ: {raw_s})")
+    if not parts and raw_p and not any(raw_p == bw for bw in bad_words): parts.append(f"[คำชม] {raw_p}")
     
     feedback_val = " ".join(parts) if parts else "-"
 
     # 7. ชื่อลูกค้า
     name_val = "-"
-    if len(raw_n) > 1 and not any(kw in raw_n for kw in ["ผู้ป่วย", "ญาติ", "ติดต่อ"]):
-        name_val = raw_n
+    if raw_n and len(raw_n) > 1 and not any(kw in raw_n for kw in ["ผู้ป่วย", "ญาติ"]):
+        clean_n = re.sub(r"^[\-\_]+|[\-\_]+$", "", raw_n)
+        if clean_n: name_val = clean_n
 
     return {
         "วันที่": date_val,
