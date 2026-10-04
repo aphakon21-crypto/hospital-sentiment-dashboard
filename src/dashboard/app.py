@@ -340,6 +340,38 @@ def login_form():
         transform: translateY(-2px) !important;
         box-shadow: 0 8px 22px rgba(2, 132, 199, 0.4) !important;
     }
+    /* คืนค่าฟอนต์ให้ไอคอนของ Streamlit แสดงผลเป็นรูปลูกศรตามปกติ */
+[data-testid="stIconMaterial"],
+.material-symbols-rounded,
+.material-icons,
+[data-testid="collapsedControl"] span,
+[data-testid="stSidebarCollapseButton"] span,
+[data-testid="stSidebar"] button span {
+    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
+    font-style: normal !important;
+    font-weight: normal !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
+    direction: ltr !important;
+    -webkit-font-feature-settings: 'liga' !important;
+    font-feature-settings: 'liga' !important;
+}
+/* จัดระยะและขนาดปุ่มพับ-กาง Sidebar */
+[data-testid="stSidebarCollapseButton"] button {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: transparent !important;
+    color: #ffffff !important;
+    border: none !important;
+}
+
+[data-testid="stSidebarCollapseButton"] button:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+}
     </style>
 
     """, unsafe_allow_html=True)
