@@ -99,28 +99,33 @@ def delete_complaint_by_id(record_id: int):
     except Exception as e:
         st.error(f"⚠️ ลบข้อมูลไม่สำเร็จ: {e}")
 
-# --- 4. ฟังก์ชันจัดการบัญชีผู้ใช้งาน (Users) ---
+# --- ฟังก์ชันจัดการบัญชีผู้ใช้งาน (Users) ใน db_manager.py ---
 def fetch_all_users() -> pd.DataFrame:
-    """ดึงรายชื่อผู้ใช้ทั้งหมด"""
+    """ดึงรายชื่อผู้ใช้ทั้งหมดจาก Supabase"""
     try:
         supabase = get_db_client()
-        res = supabase.table("app_users").select("username, role, created_at").execute()
-        return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+        # ดึงเฉพาะคอลัมน์ที่มีอยู่จริง เพื่อป้องกัน Error เรื่องคอลัมน์ created_at หาย
+        res = supabase.table("app_users").select("username, role").execute()
+        if res.data:
+            return pd.DataFrame(res.data)
+        return pd.DataFrame(columns=["username", "role"])
     except Exception as e:
-        st.error(f"⚠️ ดึงรายชื่อผู้ใช้ไม่สำเร็จ: {e}")
-        return pd.DataFrame()
+        st.error(f"⚠️️ ดึงรายชื่อผู้ใช้ไม่สำเร็จ: {e}")
+        return pd.DataFrame(columns=["username", "role"])
 
 def create_user(username, password, role="user"):
-    """สร้างผู้ใช้งานใหม่"""
+    """สร้างผู้ใช้งานใหม่ลง Supabase พร้อมแจ้งเตือน"""
     try:
         supabase = get_db_client()
-        supabase.table("app_users").insert({
-            "username": username,
-            "password_hash": password,
-            "role": role
+        res = supabase.table("app_users").insert({
+            "username": str(username).strip(),
+            "password_hash": str(password).strip(),
+            "role": str(role).strip()
         }).execute()
+        return True
     except Exception as e:
-        st.error(f"⚠️ เพิ่มผู้ใช้ไม่สำเร็จ: {e}")
+        st.error(f"⚠️ ไม่สามารถบันทึกผู้ใช้ลงฐานข้อมูลได้: {e}")
+        return False
 
 def delete_user_by_name(username):
     """ลบผู้ใช้งานตามชื่อ"""
