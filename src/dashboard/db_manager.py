@@ -10,9 +10,15 @@ from supabase import create_client, Client
 def get_db_client() -> Client:
     url = st.secrets.get("SUPABASE_URL", "")
     key = st.secrets.get("SUPABASE_KEY", "")
+    
     if not url or not key:
         raise ValueError("ไม่พบคีย์ SUPABASE_URL หรือ SUPABASE_KEY ใน st.secrets")
-    return create_client(url, key)
+        
+    # ล้างค่า URL ป้องกันช่องว่าง, เครื่องหมาย / ปิดท้าย และคำว่า /rest/v1 ซ้ำซ้อน
+    clean_url = url.strip().rstrip("/").replace("/rest/v1", "")
+    clean_key = key.strip()
+    
+    return create_client(clean_url, clean_key)
 
 # --- 2. ฟังก์ชันยืนยันตัวตนผู้ใช้งาน ---
 def authenticate(username, password):
