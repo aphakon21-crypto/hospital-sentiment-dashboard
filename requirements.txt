@@ -14,3 +14,6 @@ pypdf>=4.0.0
 python-pptx>=0.6.22
 openpyxl>=3.1.2
 toml>=0.10.2
+supabase
+reportlab
+kaleido==0.2.1
