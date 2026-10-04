@@ -491,14 +491,12 @@ def inject_custom_css():
     @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap');
 
     /* 2. บังคับใช้ฟอนต์ LINE Seed Sans TH กับทุกจุด ทุกแท็กในหน้าเว็บ */
-    html, body, [class*="css"], .stApp,
-    h1, h2, h3, h4, h5, h6, p, span, div, label,
+    html, body, .stApp,
+    h1, h2, h3, h4, h5, h6, p, label,
     button, input, textarea, select, a,
     .stSelectbox, .stTextInput, .stTextArea, .stButton,
-    .stMarkdown, .stCaption, [data-testid="stMarkdownContainer"] p,
-    [data-baseweb="tab"], [data-baseweb="select"], [data-baseweb="popover"],
-    .stDateInput div, .stDownloadButton button {
-        font-family: 'LINESeedSansTH', 'LINE Seed Sans TH', 'Prompt', sans-serif !important;
+    .stMarkdown, .stCaption, [data-testid="stMarkdownContainer"] p {
+    font-family: 'LINESeedSansTH', 'LINE Seed Sans TH', 'Prompt', sans-serif !important;
     }
 
     /* 3. ปรับสีพื้นหลังหลักของแอป: โทนน้ำเงินเข้ม (Dark Slate Blue) ลายรังผึ้ง */
@@ -889,6 +887,41 @@ def inject_custom_css():
         position: relative;
         z-index: 2;
     }
+    /* คืนค่าฟอนต์ Material Icons ให้กับปุ่มของ Streamlit ทั้งหมด */
+[data-testid="stSidebarCollapseButton"] span,
+[data-testid="collapsedControl"] span,
+[data-testid="stIconMaterial"],
+.material-symbols-rounded,
+.material-icons {
+    font-family: 'Material Symbols Rounded', 'Material Icons' !important;
+    font-style: normal !important;
+    font-weight: normal !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+    direction: ltr !important;
+    -webkit-font-feature-settings: 'liga' !important;
+    font-feature-settings: 'liga' !important;
+}
+
+/* จัดตำแหน่งและขนาดปุ่มพับ Sidebar ด้านบนให้พอดี ไม่ล้นออกมา */
+[data-testid="stSidebarCollapseButton"] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    padding-right: 12px !important;
+}
+
+[data-testid="stSidebarCollapseButton"] button {
+    background: transparent !important;
+    border: none !important;
+    color: #94a3b8 !important;
+}
+
+[data-testid="stSidebarCollapseButton"] button:hover {
+    color: #38bdf8 !important;
+}
     </style>
     """, unsafe_allow_html=True)
 
