@@ -153,9 +153,8 @@ st.set_page_config(
     page_title="โรงพยาบาลสิริเวช จันทบุรี - Retail Sentiment Analytics",
     page_icon="🏥",
     layout="wide",
-    initial_sidebar_state="expanded"  # 👈 บังคับให้เปิด Sidebar ค้างไว้เสมอ
+    initial_sidebar_state="expanded",  # บังคับเปิด Sidebar อัตโนมัติทุกครั้งที่โหลดหน้า
 )
-
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = ROOT / "data"
@@ -287,76 +286,51 @@ def login_form():
     # 2. CSS ตกแต่งหน้า Login ตามภาพ Ref
     st.markdown("""
     <style>
-    /* ✅ ซ่อนเฉพาะ Header มาตรฐาน แต่คงปุ่มลูกศรเรียก Sidebar ไว้ ✅ */
-header[data-testid="stHeader"] { 
-    background: transparent !important; 
+/* 1. ไม่ซ่อน Header ทั้งหมด แต่ทำให้โปร่งใสและไม่บังการคลิก */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 3.5rem !important;
+    z-index: 99990 !important;
 }
+
+/* 2. บังคับดึงปุ่มลูกศรเรียก Sidebar (collapsedControl) ให้ลอยขึ้นมามุมซ้ายบน */
 [data-testid="collapsedControl"] {
-    display: block !important;
+    display: flex !important;
     visibility: visible !important;
-    z-index: 99999 !important;
-    color: #ffffff !important;
+    position: fixed !important;
+    top: 14px !important;
+    left: 16px !important;
+    z-index: 999999 !important;
+    opacity: 1 !important;
 }
+
+/* 3. ตกแต่งปุ่มให้เป็นสีฟ้าสิริเวช มองเห็นชัดเจนบนพื้นหลังมืด */
 [data-testid="collapsedControl"] button {
-    background-color: #0f172a !important;
-    border: 1px solid rgba(56, 189, 248, 0.4) !important;
-    border-radius: 8px !important;
-    color: #38bdf8 !important;
+    background-color: #0284c7 !important;
+    border: 2px solid #38bdf8 !important;
+    border-radius: 10px !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 15px rgba(2, 132, 199, 0.6) !important;
+    width: 42px !important;
+    height: 42px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
-    
-    .stApp {
-        background: radial-gradient(circle at 10% 20%, #e8f4fc 0%, #f7fbfe 50%, #f0f7fd 100%) !important;
-    }
 
-    [data-testid="stForm"] {
-        background: #ffffff !important;
-        border: 1px solid rgba(226, 232, 240, 0.8) !important;
-        border-radius: 28px !important;
-        padding: 40px 36px 30px 36px !important;
-        box-shadow: 0 20px 50px rgba(2, 132, 199, 0.08), 0 4px 12px rgba(0, 0, 0, 0.03) !important;
-        margin-top: 5vh !important;
-    }
+[data-testid="collapsedControl"] button:hover {
+    background-color: #0369a1 !important;
+    transform: scale(1.05) !important;
+}
 
-    .stTextInput input {
-        background-color: #f8fafc !important;
-        border: 1px solid #e2e8f0 !important;
-        border-radius: 12px !important;
-        padding: 12px 16px !important;
-        color: #1e293b !important;
-        font-size: 15px !important;
-        transition: all 0.2s ease !important;
-    }
-    .stTextInput input:focus {
-        background-color: #ffffff !important;
-        border-color: #0284c7 !important;
-        box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15) !important;
-    }
-    .stTextInput label {
-        color: #1e293b !important;
-        font-weight: 700 !important;
-        font-size: 14px !important;
-        margin-bottom: 4px !important;
-    }
-
-    [data-testid="stFormSubmitButton"] > button {
-        background: #0284c7 !important;
-        color: #ffffff !important;
-        border-radius: 12px !important;
-        border: none !important;
-        padding: 12px 20px !important;
-        font-weight: 700 !important;
-        font-size: 16px !important;
-        letter-spacing: 0.5px;
-        box-shadow: 0 6px 18px rgba(2, 132, 199, 0.3) !important;
-        transition: all 0.25s ease !important;
-        margin-top: 10px !important;
-    }
-    [data-testid="stFormSubmitButton"] > button:hover {
-        background: #0369a1 !important;
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 22px rgba(2, 132, 199, 0.4) !important;
-    }
-    </style>
+/* 4. เปลี่ยนสีไอคอนลูกศรด้านในปุ่มให้เป็นสีขาวสว่าง */
+[data-testid="collapsedControl"] svg {
+    fill: #ffffff !important;
+    stroke: #ffffff !important;
+    width: 22px !important;
+    height: 22px !important;
+}
+</style>
     """, unsafe_allow_html=True)
 
     # 3. จัดกึ่งกลางหน้าจอ
@@ -3072,26 +3046,27 @@ def main():
     inject_custom_css()
     render_header_navbar()
 
-    # ตรวจสอบสิทธิ์ Admin
-    is_admin = st.session_state.get("auth", {}).get("role") == "admin"
-    auth_user = st.session_state.get("auth", {})
+    # ตรวจสอบสิทธิ์ผู้ใช้งาน
+    auth_data = st.session_state.get("auth", {})
+    is_admin = auth_data.get("role") == "admin"
 
-    # แถบเมนูด้านข้าง (Sidebar) ชัดเจน เรียบร้อย
-    st.sidebar.markdown(f"### 🏥 เมนูระบบงาน")
-    st.sidebar.markdown(f"**ผู้ใช้:** `{auth_user.get('username')}` | **สิทธิ์:** `{auth_user.get('role').upper()}`")
-    
-    sidebar_menu = [
+    # --- เมนูควบคุมแถบด้านข้าง (Sidebar) ---
+    st.sidebar.title("🏥 เมนูระบบ")
+    st.sidebar.markdown(f"**ผู้ใช้:** `{auth_data.get('username', 'User')}` | **สิทธิ์:** `{auth_data.get('role', 'user').upper()}`")
+    st.sidebar.markdown("---")
+
+    menu_list = [
         "📊 หน้าหลัก (Dashboard & Analytics)",
-        "📑 ตารางข้อมูล Real-Time (Cloud Sync)",
+        "📑 ข้อมูลข้อร้องเรียน (Cloud Sync)",
         "📤 ส่งออกรายงาน PDF"
     ]
     if is_admin:
-        sidebar_menu.append("⚙️ การจัดการผู้ใช้งาน (Admin Only)")
-        
-    choice = st.sidebar.radio("เลือกหน้าทำงาน:", sidebar_menu)
+        menu_list.append("⚙️ จัดการผู้ใช้งาน (Admin Only)")
 
-    # 1. หน้าแดชบอร์ดหลัก (มีแบนเนอร์ การ์ดคะแนน และแท็บวิเคราะห์แบบเดิมของคุณ)
-    if choice == "📊 หน้าหลัก (Dashboard & Analytics)":
+    selected_menu = st.sidebar.radio("เลือกหน้าทำงาน:", menu_list)
+
+    # --- แสดงผลตามเมนูที่เลือก ---
+    if selected_menu == "📊 หน้าหลัก (Dashboard & Analytics)":
         render_reference_banner()
 
         tab1, tab2, tab3, tab4 = st.tabs([
@@ -3121,16 +3096,13 @@ def main():
         render_aspect_analytics_section()
         render_executive_summary_section()
 
-    # 2. หน้าตารางข้อมูล Cloud
-    elif choice == "📑 ตารางข้อมูล Real-Time (Cloud Sync)":
+    elif selected_menu == "📑 ข้อมูลข้อร้องเรียน (Cloud Sync)":
         page_cloud_data_and_management(is_admin)
 
-    # 3. หน้าส่งออก PDF
-    elif choice == "📤 ส่งออกรายงาน PDF":
+    elif selected_menu == "📤 ส่งออกรายงาน PDF":
         page_export_pdf()
 
-    # 4. หน้าจัดการผู้ใช้ (Admin เท่านั้น)
-    elif choice == "⚙️ การจัดการผู้ใช้งาน (Admin Only)" and is_admin:
+    elif selected_menu == "⚙️ จัดการผู้ใช้งาน (Admin Only)" and is_admin:
         page_admin_users()
 
     render_custom_footer()
