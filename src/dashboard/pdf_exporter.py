@@ -1,17 +1,17 @@
-# pdf_exporter.py
+# src/dashboard/pdf_exporter.py
 # -*- coding: utf-8 -*-
 
 import io
 from datetime import datetime
 import pandas as pd
-import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.graphics.charts.piecharts import Pie
 
 def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
     buffer = io.BytesIO()
@@ -62,15 +62,20 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
 
     elements = []
 
-    # 1. Header หัวกระดาษ
+    # 1. หัวเอกสาร
     elements.append(Paragraph("Hospital Patient Feedback & Analytics Report", title_style))
     elements.append(Paragraph(f"Exported Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", subtitle_style))
     elements.append(Spacer(1, 14))
 
-    # 2. ตาราง KPI รวม
+    # 2. ตาราง KPI รวม 4 ช่อง
+    total_val = metrics.get("total", 0)
+    pos_val = metrics.get("pos", 0)
+    neu_val = metrics.get("neu", 0)
+    neg_val = metrics.get("neg", 0)
+
     kpi_data = [
         ["Total Feedback", "Positive", "Neutral", "Negative"],
-        [str(metrics.get("total", 0)), str(metrics.get("pos", 0)), str(metrics.get("neu", 0)), str(metrics.get("neg", 0))]
+        [str(total_val), str(pos_val), str(neu_val), str(neg_val)]
     ]
     kpi_table = Table(kpi_data, colWidths=[130, 130, 130, 130])
     kpi_table.setStyle(TableStyle([
@@ -85,44 +90,48 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
         ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#f8fafc')),
     ]))
     elements.append(kpi_table)
-    elements.append(Spacer(1, 15))
+    elements.append(Spacer(1, 12))
 
-    # 3. สร้างกราฟ Donut Chart สรุปสัดส่วน (Matplotlib Image)
-    pos = metrics.get("pos", 0)
-    neu = metrics.get("neu", 0)
-    neg = metrics.get("neg", 0)
-    if (pos + neu + neg) > 0:
-        fig, ax = plt.subplots(figsize=(6, 2.2), dpi=180)
-        labels = ['Positive', 'Neutral', 'Negative']
-        sizes = [pos, neu, neg]
-        chart_colors = ['#22c55e', '#94a3b8', '#ef4444']
-        
-        # Donut Chart
-        wedges, texts, autotexts = ax.pie(
-            sizes, labels=labels, autopct='%1.1f%%',
-            startangle=90, colors=chart_colors,
-            wedgeprops=dict(width=0.45, edgecolor='w')
-        )
-        for t in texts:
-            t.set_fontsize(8)
-        for at in autotexts:
-            at.set_fontsize(8)
-            at.set_weight('bold')
-        ax.axis('equal')
-        plt.tight_layout()
-
-        img_buf = io.BytesIO()
-        plt.savefig(img_buf, format='png', bbox_inches='tight', transparent=True)
-        img_buf.seek(0)
-        plt.close(fig)
-
+    # 3. กราฟพายและแถบสัดส่วน (สร้างผ่าน ReportLab Native โดยตรง ไม่ต้องพึ่ง Matplotlib)
+    if (pos_val + neu_val + neg_val) > 0:
         elements.append(Paragraph("Sentiment Breakdown Overview:", sec_style))
-        elements.append(Image(img_buf, width=4.5 * inch, height=1.65 * inch))
+        
+        d = Drawing(520, 110)
+        
+        # วาด Pie Chart ฝั่งซ้าย
+        pc = Pie()
+        pc.x = 20
+        pc.y = 10
+        pc.width = 90
+        pc.height = 90
+        pc.data = [max(0.01, pos_val), max(0.01, neu_val), max(0.01, neg_val)]
+        pc.slices[0].fillColor = colors.HexColor('#22c55e')  # เขียว (Pos)
+        pc.slices[1].fillColor = colors.HexColor('#94a3b8')  # เทา (Neu)
+        pc.slices[2].fillColor = colors.HexColor('#ef4444')  # แดง (Neg)
+        d.add(pc)
+
+        # วาด Legend คำอธิบายฝั่งขวา
+        pos_pct = (pos_val / total_val * 100) if total_val else 0
+        neu_pct = (neu_val / total_val * 100) if total_val else 0
+        neg_pct = (neg_val / total_val * 100) if total_val else 0
+
+        # Positive Box & Text
+        d.add(Rect(140, 75, 14, 14, fillColor=colors.HexColor('#22c55e'), strokeColor=None))
+        d.add(String(165, 78, f"Positive (เชิงบวก): {pos_val} รายการ ({pos_pct:.1f}%)", fontName='Helvetica-Bold', fontSize=9, fillColor=colors.HexColor('#1e293b')))
+
+        # Neutral Box & Text
+        d.add(Rect(140, 50, 14, 14, fillColor=colors.HexColor('#94a3b8'), strokeColor=None))
+        d.add(String(165, 53, f"Neutral (เป็นกลาง): {neu_val} รายการ ({neu_pct:.1f}%)", fontName='Helvetica-Bold', fontSize=9, fillColor=colors.HexColor('#1e293b')))
+
+        # Negative Box & Text
+        d.add(Rect(140, 25, 14, 14, fillColor=colors.HexColor('#ef4444'), strokeColor=None))
+        d.add(String(165, 28, f"Negative (เชิงลบ): {neg_val} รายการ ({neg_pct:.1f}%)", fontName='Helvetica-Bold', fontSize=9, fillColor=colors.HexColor('#1e293b')))
+
+        elements.append(d)
         elements.append(Spacer(1, 10))
 
     # 4. ตารางประเมินผลคะแนนรายแผนก (Department Performance Scores)
     if df_sample is not None and not df_sample.empty:
-        # หาชื่อคอลัมน์แผนกและข้อความ
         dept_col = next((c for c in ["แผนกที่เกี่ยวข้อง", "department", "category", "แผนกที่ประเมิน"] if c in df_sample.columns), None)
         sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df_sample.columns), None)
 
@@ -134,7 +143,7 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
                 d_neg = int(group[sent_col].astype(str).str.contains("ลบ|neg|ปรับปรุง|-1").sum())
                 d_score = round((d_pos / (d_pos + d_neg)) * 5.0, 1) if (d_pos + d_neg) > 0 else 3.5
                 dept_summary.append({
-                    "dept": str(d_name)[:28],
+                    "dept": str(d_name)[:30],
                     "total": d_total,
                     "pos": d_pos,
                     "neg": d_neg,
@@ -166,9 +175,9 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
             ]))
             elements.append(dept_table)
-            elements.append(Spacer(1, 15))
+            elements.append(Spacer(1, 14))
 
-    # 5. ตารางตัวอย่างข้อร้องเรียนล่าสุด (Recent Complaints)
+    # 5. ตารางข้อร้องเรียนล่าสุด (Recent Complaints)
     if df_sample is not None and not df_sample.empty:
         elements.append(Paragraph("Recent Complaints Summary (Top 5):", sec_style))
         
