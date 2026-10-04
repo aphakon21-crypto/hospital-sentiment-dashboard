@@ -285,52 +285,63 @@ def login_form():
 
     # 2. CSS ตกแต่งหน้า Login ตามภาพ Ref
     st.markdown("""
-    <style>
-/* 1. ไม่ซ่อน Header ทั้งหมด แต่ทำให้โปร่งใสและไม่บังการคลิก */
-header[data-testid="stHeader"] {
-    background: transparent !important;
-    height: 3.5rem !important;
-    z-index: 99990 !important;
-}
+<style>
+    [data-testid="collapsedControl"], header { display: none; }
+    
+    .stApp {
+        background: radial-gradient(circle at 10% 20%, #e8f4fc 0%, #f7fbfe 50%, #f0f7fd 100%) !important;
+    }
 
-/* 2. บังคับดึงปุ่มลูกศรเรียก Sidebar (collapsedControl) ให้ลอยขึ้นมามุมซ้ายบน */
-[data-testid="collapsedControl"] {
-    display: flex !important;
-    visibility: visible !important;
-    position: fixed !important;
-    top: 14px !important;
-    left: 16px !important;
-    z-index: 999999 !important;
-    opacity: 1 !important;
-}
+    [data-testid="stForm"] {
+        background: #ffffff !important;
+        border: 1px solid rgba(226, 232, 240, 0.8) !important;
+        border-radius: 28px !important;
+        padding: 40px 36px 30px 36px !important;
+        box-shadow: 0 20px 50px rgba(2, 132, 199, 0.08), 0 4px 12px rgba(0, 0, 0, 0.03) !important;
+        margin-top: 5vh !important;
+    }
 
-/* 3. ตกแต่งปุ่มให้เป็นสีฟ้าสิริเวช มองเห็นชัดเจนบนพื้นหลังมืด */
-[data-testid="collapsedControl"] button {
-    background-color: #0284c7 !important;
-    border: 2px solid #38bdf8 !important;
-    border-radius: 10px !important;
-    color: #ffffff !important;
-    box-shadow: 0 4px 15px rgba(2, 132, 199, 0.6) !important;
-    width: 42px !important;
-    height: 42px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
+    .stTextInput input {
+        background-color: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 12px !important;
+        padding: 12px 16px !important;
+        color: #1e293b !important;
+        font-size: 15px !important;
+        transition: all 0.2s ease !important;
+    }
+    .stTextInput input:focus {
+        background-color: #ffffff !important;
+        border-color: #0284c7 !important;
+        box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15) !important;
+    }
+    .stTextInput label {
+        color: #1e293b !important;
+        font-weight: 700 !important;
+        font-size: 14px !important;
+        margin-bottom: 4px !important;
+    }
 
-[data-testid="collapsedControl"] button:hover {
-    background-color: #0369a1 !important;
-    transform: scale(1.05) !important;
-}
+    [data-testid="stFormSubmitButton"] > button {
+        background: #0284c7 !important;
+        color: #ffffff !important;
+        border-radius: 12px !important;
+        border: none !important;
+        padding: 12px 20px !important;
+        font-weight: 700 !important;
+        font-size: 16px !important;
+        letter-spacing: 0.5px;
+        box-shadow: 0 6px 18px rgba(2, 132, 199, 0.3) !important;
+        transition: all 0.25s ease !important;
+        margin-top: 10px !important;
+    }
+    [data-testid="stFormSubmitButton"] > button:hover {
+        background: #0369a1 !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 22px rgba(2, 132, 199, 0.4) !important;
+    }
+    </style>
 
-/* 4. เปลี่ยนสีไอคอนลูกศรด้านในปุ่มให้เป็นสีขาวสว่าง */
-[data-testid="collapsedControl"] svg {
-    fill: #ffffff !important;
-    stroke: #ffffff !important;
-    width: 22px !important;
-    height: 22px !important;
-}
-</style>
     """, unsafe_allow_html=True)
 
     # 3. จัดกึ่งกลางหน้าจอ
