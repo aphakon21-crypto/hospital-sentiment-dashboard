@@ -491,9 +491,6 @@ def inject_custom_css():
         opacity: 1 !important;
     }
 
-    /* ซ่อน Header มาตรฐานของ Streamlit */
-    header[data-testid="stHeader"] { display: none; }
-    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; max-width: 1220px !important; }
 
     /* Top Navbar สไตล์สิริเวช */
     .srh-navbar {
