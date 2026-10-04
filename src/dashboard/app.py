@@ -155,32 +155,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# แสดงข้อมูลผู้ใช้และปุ่มออกจากระบบที่ Sidebar
-st.sidebar.markdown(f"**ผู้ใช้งาน:** `{st.session_state['username']}` | **สิทธิ์:** `{st.session_state['role']}`")
-if st.sidebar.button("ออกจากระบบ"):
-    st.session_state["logged_in"] = False
-    st.session_state["username"] = ""
-    st.session_state["role"] = "user"
-    st.rerun()
-
-# ==========================================
-# จุดที่ 3: วางต่อจากปุ่ม "ออกจากระบบ" ของจุดที่ 2
-# ==========================================
-
-is_admin = st.session_state["role"] == "admin"
-
-nav_options = [
-    "📊 แดชบอร์ดวิเคราะห์", 
-    "📥 อัปโหลดสกัดไฟล์ PDF", 
-    "📑 ตารางข้อมูลและจัดการ", 
-    "📤 ส่งออกรายงาน PDF"
-]
-
-# ถ้าล็อกอินด้วย Admin เมนูจัดการผู้ใช้จะโผล่ขึ้นมาอัตโนมัติ
-if is_admin:
-    nav_options.append("⚙️ การจัดการผู้ใช้งาน (Admin Only)")
-
-selected_tab = st.sidebar.radio("เลือกหน้าทำงาน", nav_options)
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = ROOT / "data"
@@ -2978,7 +2952,7 @@ def main():
     # ตรวจสอบสิทธิ์ Admin จากระบบล็อกอิน
     is_admin = st.session_state.get("auth", {}).get("role") == "admin"
 
-    # จัดแท็บเมนูด้านบน (ถ้าเป็น Admin จะมีแท็บที่ 5 โผล่ขึ้นมา)
+    # จัดแท็บเมนูด้านบน (ถ้าเป็น Admin จะมีแท็บที่ 5 โผล่ขึ้นมาอัตโนมัติ)
     tab_titles = [
         "🔍 วิเคราะห์ความคิดเห็น (Analyze)",
         "📊 สรุปผลสถิติ (Summary)",
@@ -2990,6 +2964,7 @@ def main():
 
     tabs = st.tabs(tab_titles)
 
+    # แท็บที่ 1: หน้าวิเคราะห์ความคิดเห็น
     with tabs[0]:
         render_reference_banner()
         banner("analyze")
@@ -2998,26 +2973,25 @@ def main():
         render_aspect_analytics_section()
         render_executive_summary_section()
 
+    # แท็บที่ 2: หน้าสรุปสถิติ
     with tabs[1]:
         banner("summary")
         page_summary()
 
+    # แท็บที่ 3: ตารางข้อมูล Cloud Real-Time + ปุ่มลบเฉพาะ Admin
     with tabs[2]:
         page_cloud_data_and_management(is_admin)
 
+    # แท็บที่ 4: ส่งออกรายงาน PDF
     with tabs[3]:
         page_export_pdf()
 
+    # แท็บที่ 5: หน้าจัดการผู้ใช้งาน (เข้าได้เฉพาะ Admin)
     if is_admin:
         with tabs[4]:
             page_admin_users()
 
-    render_department_realtime_cards()
-    # 4. เรียก Footer ทัศนียภาพจันทบุรี + คลื่นน้ำแอนิเมชัน + ข้อความ
-    render_aspect_analytics_section()
-
-    render_executive_summary_section()
-
+    # Footer ด้านล่างสุดของเว็บ (เรียกครั้งเดียว)
     render_custom_footer()
 
 if __name__ == "__main__":
