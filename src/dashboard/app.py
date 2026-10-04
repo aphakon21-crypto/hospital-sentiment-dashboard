@@ -3042,9 +3042,9 @@ def page_cloud_data_and_management(is_admin: bool):
 
 def page_export_pdf():
     st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
-    st.markdown("<h3 style='color:#38bdf8; font-weight:800;'>📤 ส่งออกรายงานผลสรุปเป็นไฟล์ PDF (Executive Summary)</h3>", unsafe_allow_html=True)
+    st.markdown("### 📤 ส่งออกรายงานผลสรุปเป็นไฟล์ PDF (Executive Summary)")
 
-    # 1. รวบรวมข้อมูลจาก Cloud Database ก่อน
+    # 1. รวบรวมข้อมูลที่มีอยู่ทั้งหมด
     df_all = pd.DataFrame()
     if db:
         try:
@@ -3052,11 +3052,9 @@ def page_export_pdf():
         except Exception:
             df_all = pd.DataFrame()
 
-    # 2. ถ้าใน Cloud ยังไม่มี ให้ดึงจาก Log ในเครื่องหรือประวัติการวิเคราะห์ Bulk ทันที
     if df_all.empty:
         df_all = load_log()
 
-    # 3. ตรวจสอบข้อมูลเสริมจาก Bulk Upload ในรอบปัจจุบัน
     if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
         b_df = st.session_state["last_bulk_df"]
         if len(b_df) > len(df_all):
@@ -3066,14 +3064,8 @@ def page_export_pdf():
     pos = 0
     neg = 0
 
-    # ตรวจสอบการนับความรู้สึกจากชื่อคอลัมน์ทุกรูปแบบ
     if not df_all.empty:
-        sent_col = None
-        for col_name in ["ความรู้สึก", "label", "ผลภาพรวม (Overall)", "ผลวิเคราะห์"]:
-            if col_name in df_all.columns:
-                sent_col = col_name
-                break
-
+        sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df_all.columns), None)
         if sent_col:
             val_series = df_all[sent_col].astype(str).str.lower()
             pos = int(val_series.str.contains("บวก|pos|พอใจ|1").sum())
@@ -3088,18 +3080,18 @@ def page_export_pdf():
     c3.metric("เป็นกลาง (Neutral)", neu)
     c4.metric("เชิงลบ (Negative)", neg)
 
-    st.write("เอกสาร PDF จะรวบรวมตัวเลขสถิติ ผลสรุปการวิเคราะห์ และตารางข้อร้องเรียนล่าสุด")
+    st.write("เอกสาร PDF จะรวบรวมตัวเลขสถิติ กราฟสัดส่วนความรู้สึก ตารางคะแนนดาวรายแผนก และตัวอย่างข้อร้องเรียนล่าสุด")
 
     if st.button("🚀 สร้างและดาวน์โหลดเอกสาร PDF", type="primary"):
         if total == 0:
-            st.warning("⚠️ ยังไม่มีข้อมูลความคิดเห็นในระบบสำหรับสร้างเอกสาร PDF")
+            st.warning("⚠️ ยังไม่มีข้อมูลความคิดเห็นสำหรับสร้างเอกสาร PDF")
         elif generate_pdf_report:
-            with st.spinner("กำลังประกอบหน้าเอกสาร PDF..."):
+            with st.spinner("กำลังเรนเดอร์กราฟและประกอบเอกสาร PDF..."):
                 pdf_bytes = generate_pdf_report(metrics, fig_radar=None, df_sample=df_all)
                 st.download_button(
                     label="📥 คลิกที่นี่เพื่อดาวน์โหลดไฟล์ PDF",
                     data=pdf_bytes,
-                    file_name=f"Hospital_Sentiment_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    file_name=f"Hospital_Sentiment_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
                     mime="application/pdf"
                 )
         else:
