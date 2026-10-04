@@ -5,7 +5,7 @@ import io
 import os
 import urllib.request
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 
 from reportlab.lib.pagesizes import A4
@@ -19,19 +19,24 @@ from reportlab.graphics.charts.piecharts import Pie
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# --- 1. ระบบดาวน์โหลดและติดตั้งฟอนต์ภาษาไทยอัตโนมัติ ---
+# --- 1. คำนวณเวลาประเทศไทย (ICT / UTC+7) ---
+def get_thai_current_time_str() -> str:
+    # ปรับเวลาให้เป็นโซนเวลาประเทศไทยเสมอ แม้รันอยู่บน Cloud Server
+    thai_tz = timezone(timedelta(hours=7))
+    now_thai = datetime.now(thai_tz)
+    return now_thai.strftime("%Y-%m-%d %H:%M น.")
+
+# --- 2. ระบบติดตั้งฟอนต์ภาษาไทย ---
 def setup_thai_font() -> str:
     font_name = "Prompt-Regular"
     font_bold = "Prompt-Bold"
     
-    # โฟลเดอร์เก็บฟอนต์ชั่วคราว
     font_dir = Path(__file__).resolve().parent / "assets" / "fonts"
     font_dir.mkdir(parents=True, exist_ok=True)
     
     reg_path = font_dir / "Prompt-Regular.ttf"
     bold_path = font_dir / "Prompt-Bold.ttf"
 
-    # ดาวน์โหลดฟอนต์ Prompt จาก Google Fonts CDN ถ้ายังไม่มี
     if not reg_path.exists():
         url_reg = "https://github.com/google/fonts/raw/main/ofl/prompt/Prompt-Regular.ttf"
         try:
@@ -46,7 +51,6 @@ def setup_thai_font() -> str:
         except Exception:
             pass
 
-    # ลงทะเบียนฟอนต์กับ ReportLab
     try:
         if reg_path.exists():
             pdfmetrics.registerFont(TTFont(font_name, str(reg_path)))
@@ -57,7 +61,6 @@ def setup_thai_font() -> str:
         return "Helvetica"
 
 def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
-    # ติดตั้งฟอนต์ไทย
     thai_font = setup_thai_font()
     thai_bold = "Prompt-Bold" if "Prompt-Bold" in pdfmetrics.getRegisteredFontNames() else thai_font
 
@@ -117,9 +120,9 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
 
     elements = []
 
-    # 1. หัวเอกสาร
+    # 1. หัวเอกสารและเวลาประเทศไทยที่ตรงตามจริง
     elements.append(Paragraph("รายงานผลวิเคราะห์ความคิดเห็นของผู้รับบริการ (Customer Sentiment Report)", title_style))
-    elements.append(Paragraph(f"โรงพยาบาลสิริเวช จันทบุรี | ข้อมูล ณ วันที่: {datetime.now().strftime('%Y-%m-%d %H:%M')}", subtitle_style))
+    elements.append(Paragraph(f"โรงพยาบาลสิริเวช จันทบุรี | ข้อมูล ณ วันที่: {get_thai_current_time_str()}", subtitle_style))
     elements.append(Spacer(1, 14))
 
     # 2. ตาราง KPI ภาพรวม
@@ -182,7 +185,7 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
         elements.append(d)
         elements.append(Spacer(1, 10))
 
-    # 4. ตารางคะแนนและสถิติรายแผนก
+    # 4. ตารางคะแนนและสถิติรายแผนก (แก้ปัญหาดาวหลุดเป็นกล่องสี่เหลี่ยม)
     if df_sample is not None and not df_sample.empty:
         dept_col = next((c for c in ["แผนกที่เกี่ยวข้อง", "department", "category", "แผนกที่ประเมิน"] if c in df_sample.columns), None)
         sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df_sample.columns), None)
@@ -190,7 +193,6 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
         if dept_col and sent_col:
             dept_summary = []
             for d_name, group in df_sample.groupby(dept_col):
-                # กรองชื่อแผนกที่ไม่ใช่ nan หรือขีด
                 clean_name = str(d_name).strip()
                 if clean_name.lower() in ["nan", "none", "", "-"]:
                     clean_name = "บริการทั่วไปของโรงพยาบาล"
@@ -215,7 +217,7 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
                  Paragraph("<font color='white'><b>รวม (เรื่อง)</b></font>", cell_bold_style),
                  Paragraph("<font color='white'><b>เชิงบวก</b></font>", cell_bold_style),
                  Paragraph("<font color='white'><b>เชิงลบ</b></font>", cell_bold_style),
-                 Paragraph("<font color='white'><b>คะแนน (/5.0)</b></font>", cell_bold_style)]
+                 Paragraph("<font color='white'><b>คะแนนความพึงพอใจ</b></font>", cell_bold_style)]
             ]
             for row in dept_summary[:8]:
                 dept_table_data.append([
@@ -223,7 +225,8 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
                     str(row["total"]),
                     str(row["pos"]),
                     str(row["neg"]),
-                    f"{row['score']:.1f} ★"
+                    # ปรับเป็นคะแนน / 5.0 ชัดเจน ไม่มีบั๊กตัวอักษรกล่องสี่เหลี่ยม
+                    Paragraph(f"<b>{row['score']:.1f}</b> / 5.0", cell_style)
                 ])
 
             dept_table = Table(dept_table_data, colWidths=[200, 75, 80, 80, 85])
@@ -253,7 +256,6 @@ def generate_pdf_report(metrics: dict, fig_radar=None, df_sample=None) -> bytes:
              Paragraph("<b>ข้อความความคิดเห็น / ข้อเสนอแนะ</b>", cell_bold_style)]
         ]
         
-        # กรองเอาเฉพาะแถวที่มีข้อความจริง ไม่เป็นขีดหรือว่างเปล่า
         valid_rows = df_sample.copy()
         if feed_col:
             valid_rows = valid_rows[~valid_rows[feed_col].astype(str).str.strip().isin(["-", "nan", "None", ""])]
