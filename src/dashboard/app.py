@@ -3044,12 +3044,42 @@ def page_export_pdf():
     st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
     st.markdown("<h3 style='color:#38bdf8; font-weight:800;'>📤 ส่งออกรายงานผลสรุปเป็นไฟล์ PDF (Executive Summary)</h3>", unsafe_allow_html=True)
 
-    df_all = db.fetch_complaints() if db else load_log()
-    total = len(df_all)
-    pos = (df_all["ความรู้สึก"] == "บวก").sum() if "ความรู้สึก" in df_all.columns else 0
-    neg = (df_all["ความรู้สึก"] == "ลบ").sum() if "ความรู้สึก" in df_all.columns else 0
-    neu = total - (pos + neg)
+    # 1. รวบรวมข้อมูลจาก Cloud Database ก่อน
+    df_all = pd.DataFrame()
+    if db:
+        try:
+            df_all = db.fetch_complaints()
+        except Exception:
+            df_all = pd.DataFrame()
 
+    # 2. ถ้าใน Cloud ยังไม่มี ให้ดึงจาก Log ในเครื่องหรือประวัติการวิเคราะห์ Bulk ทันที
+    if df_all.empty:
+        df_all = load_log()
+
+    # 3. ตรวจสอบข้อมูลเสริมจาก Bulk Upload ในรอบปัจจุบัน
+    if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
+        b_df = st.session_state["last_bulk_df"]
+        if len(b_df) > len(df_all):
+            df_all = b_df.copy()
+
+    total = len(df_all)
+    pos = 0
+    neg = 0
+
+    # ตรวจสอบการนับความรู้สึกจากชื่อคอลัมน์ทุกรูปแบบ
+    if not df_all.empty:
+        sent_col = None
+        for col_name in ["ความรู้สึก", "label", "ผลภาพรวม (Overall)", "ผลวิเคราะห์"]:
+            if col_name in df_all.columns:
+                sent_col = col_name
+                break
+
+        if sent_col:
+            val_series = df_all[sent_col].astype(str).str.lower()
+            pos = int(val_series.str.contains("บวก|pos|พอใจ|1").sum())
+            neg = int(val_series.str.contains("ลบ|neg|ปรับปรุง|-1").sum())
+
+    neu = max(0, total - (pos + neg))
     metrics = {"total": total, "pos": pos, "neu": neu, "neg": neg}
 
     c1, c2, c3, c4 = st.columns(4)
@@ -3058,10 +3088,12 @@ def page_export_pdf():
     c3.metric("เป็นกลาง (Neutral)", neu)
     c4.metric("เชิงลบ (Negative)", neg)
 
-    st.write("เอกสาร PDF จะรวบรวมตัวเลขสถิติ พร้อมตารางสรุปข้อร้องเรียนล่าสุด")
+    st.write("เอกสาร PDF จะรวบรวมตัวเลขสถิติ ผลสรุปการวิเคราะห์ และตารางข้อร้องเรียนล่าสุด")
 
     if st.button("🚀 สร้างและดาวน์โหลดเอกสาร PDF", type="primary"):
-        if generate_pdf_report:
+        if total == 0:
+            st.warning("⚠️ ยังไม่มีข้อมูลความคิดเห็นในระบบสำหรับสร้างเอกสาร PDF")
+        elif generate_pdf_report:
             with st.spinner("กำลังประกอบหน้าเอกสาร PDF..."):
                 pdf_bytes = generate_pdf_report(metrics, fig_radar=None, df_sample=df_all)
                 st.download_button(
@@ -3081,36 +3113,47 @@ def page_admin_users():
 
     if not db:
         st.error("⚠️ ไม่พบการเชื่อมต่อกับ db_manager.py")
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     col_add, col_list = st.columns([1, 1.2])
+
     with col_add:
         st.subheader("➕ เพิ่มผู้ใช้งานใหม่")
-        new_u = st.text_input("ชื่อผู้ใช้งาน (Username)")
-        new_p = st.text_input("รหัสผ่าน (Password)", type="password")
-        new_r = st.selectbox("สิทธิ์การใช้งาน (Role)", ["user", "admin"])
-        if st.button("บันทึกผู้ใช้ใหม่", type="primary"):
+        new_u = st.text_input("ชื่อผู้ใช้งาน (Username)", key="input_new_user")
+        new_p = st.text_input("รหัสผ่าน (Password)", type="password", key="input_new_pass")
+        new_r = st.selectbox("สิทธิ์การใช้งาน (Role)", ["user", "admin"], key="select_new_role")
+
+        if st.button("บันทึกผู้ใช้ใหม่", type="primary", use_container_width=True):
             if new_u and new_p:
-                db.create_user(new_u, new_p, new_r)
-                st.success(f"เพิ่มผู้ใช้ {new_u} ({new_r}) สำเร็จ!")
-                st.rerun()
+                success = db.create_user(new_u, new_p, new_r)
+                if success:
+                    st.success(f"🎉 เพิ่มผู้ใช้ `{new_u}` ({new_r}) สำเร็จ!")
+                    time.sleep(1)
+                    st.rerun()
             else:
-                st.warning("กรุณากรอกข้อมูลให้ครบถ้วน")
+                st.warning("กรุณากรอกทั้ง Username และ Password ให้ครบถ้วน")
 
     with col_list:
         st.subheader("👥 บัญชีทั้งหมดในระบบ")
         users_df = db.fetch_all_users()
+
         if not users_df.empty:
             st.dataframe(users_df, use_container_width=True)
-            u_del = st.selectbox("เลือกบัญชีที่ต้องการลบ:", users_df["username"].tolist())
-            if st.button("🗑️ ลบบัญชีผู้ใช้ที่เลือก"):
+            user_list = users_df["username"].tolist()
+            u_del = st.selectbox("เลือกบัญชีที่ต้องการลบ:", user_list, key="select_del_user")
+
+            if st.button("🗑️ ลบบัญชีผู้ใช้ที่เลือก", type="secondary"):
                 curr_user = st.session_state.get("auth", {}).get("username", "")
                 if u_del == curr_user:
-                    st.error("ไม่สามารถลบบัญชีตัวเองที่กำลังล็อกอินอยู่ได้")
+                    st.error("❌ ไม่สามารถลบบัญชีตัวเองที่กำลังล็อกอินอยู่ได้")
                 else:
                     db.delete_user_by_name(u_del)
-                    st.success(f"ลบบัญชี {u_del} เรียบร้อยแล้ว")
+                    st.success(f"ลบบัญชี `{u_del}` เรียบร้อยแล้ว")
+                    time.sleep(1)
                     st.rerun()
+        else:
+            st.info("ℹ️ ยังไม่พบรายชื่อผู้ใช้ในฐานข้อมูล หรือกำลังเชื่อมต่อไปยัง Supabase")
 
     st.markdown("</div>", unsafe_allow_html=True)
 # ============================== MAIN ==============================
