@@ -2943,55 +2943,180 @@ def render_custom_footer():
 
     st.markdown("\n".join(footer_elements), unsafe_allow_html=True)
 
+# ============================== PAGES FOR CLOUD, PDF & ADMIN ==============================
+def page_cloud_data_and_management(is_admin: bool):
+    st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#38bdf8; font-weight:800;'>📑 ตารางข้อมูลข้อร้องเรียน (Real-Time Cloud Sync)</h3>", unsafe_allow_html=True)
+
+    df_cloud = db.fetch_complaints() if db else pd.DataFrame()
+
+    if df_cloud.empty:
+        st.info("ยังไม่มีข้อมูลข้อร้องเรียนในฐานข้อมูล Cloud กรุณาอัปโหลดสกัดจากไฟล์ PDF")
+    else:
+        st.dataframe(df_cloud, use_container_width=True)
+
+        st.markdown("---")
+        if is_admin:
+            st.markdown("<h4 style='color:#f87171;'>🗑️ แผงควบคุมการลบข้อมูล (สำหรับ Admin เท่านั้น)</h4>", unsafe_allow_html=True)
+            col_id, col_btn = st.columns([3, 1])
+            with col_id:
+                target_id = st.selectbox(
+                    "เลือก ID รายการข้อร้องเรียนที่ต้องการลบ:",
+                    df_cloud["ID"].tolist(),
+                    format_func=lambda x: f"ID {x} | แผนก: {df_cloud[df_cloud['ID'] == x]['แผนกที่เกี่ยวข้อง'].values[0]} | ข้อความ: {str(df_cloud[df_cloud['ID'] == x]['ข้อความความคิดเห็นของลูกค้า'].values[0])[:40]}..."
+                )
+            with col_btn:
+                st.write("")
+                st.write("")
+                if st.button("🗑️ ยืนยันการลบข้อมูล", type="primary", use_container_width=True):
+                    db.delete_complaint_by_id(target_id)
+                    st.success(f"ลบรายการ ID {target_id} สำเร็จ!")
+                    st.rerun()
+        else:
+            st.caption("🔒 การลบข้อมูลถูกจำกัดสิทธิ์เฉพาะบัญชีระดับ Administrator เท่านั้น")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def page_export_pdf():
+    st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#38bdf8; font-weight:800;'>📤 ส่งออกรายงานผลสรุปเป็นไฟล์ PDF (Executive Summary)</h3>", unsafe_allow_html=True)
+
+    df_all = db.fetch_complaints() if db else load_log()
+    total = len(df_all)
+    pos = (df_all["ความรู้สึก"] == "บวก").sum() if "ความรู้สึก" in df_all.columns else 0
+    neg = (df_all["ความรู้สึก"] == "ลบ").sum() if "ความรู้สึก" in df_all.columns else 0
+    neu = total - (pos + neg)
+
+    metrics = {"total": total, "pos": pos, "neu": neu, "neg": neg}
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("จำนวนเรื่องทั้งหมด", total)
+    c2.metric("เชิงบวก (Positive)", pos)
+    c3.metric("เป็นกลาง (Neutral)", neu)
+    c4.metric("เชิงลบ (Negative)", neg)
+
+    st.write("เอกสาร PDF จะรวบรวมตัวเลขสถิติ พร้อมตารางสรุปข้อร้องเรียนล่าสุด")
+
+    if st.button("🚀 สร้างและดาวน์โหลดเอกสาร PDF", type="primary"):
+        if generate_pdf_report:
+            with st.spinner("กำลังประกอบหน้าเอกสาร PDF..."):
+                pdf_bytes = generate_pdf_report(metrics, fig_radar=None, df_sample=df_all)
+                st.download_button(
+                    label="📥 คลิกที่นี่เพื่อดาวน์โหลดไฟล์ PDF",
+                    data=pdf_bytes,
+                    file_name=f"Hospital_Sentiment_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf"
+                )
+        else:
+            st.error("⚠️ ไม่พบโมดูล pdf_exporter.py")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def page_admin_users():
+    st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
+    st.markdown("<h3 style='color:#38bdf8; font-weight:800;'>⚙️ จัดการบัญชีผู้ใช้งานระบบ (Admin Only)</h3>", unsafe_allow_html=True)
+
+    if not db:
+        st.error("⚠️ ไม่พบการเชื่อมต่อกับ db_manager.py")
+        return
+
+    col_add, col_list = st.columns([1, 1.2])
+    with col_add:
+        st.subheader("➕ เพิ่มผู้ใช้งานใหม่")
+        new_u = st.text_input("ชื่อผู้ใช้งาน (Username)")
+        new_p = st.text_input("รหัสผ่าน (Password)", type="password")
+        new_r = st.selectbox("สิทธิ์การใช้งาน (Role)", ["user", "admin"])
+        if st.button("บันทึกผู้ใช้ใหม่", type="primary"):
+            if new_u and new_p:
+                db.create_user(new_u, new_p, new_r)
+                st.success(f"เพิ่มผู้ใช้ {new_u} ({new_r}) สำเร็จ!")
+                st.rerun()
+            else:
+                st.warning("กรุณากรอกข้อมูลให้ครบถ้วน")
+
+    with col_list:
+        st.subheader("👥 บัญชีทั้งหมดในระบบ")
+        users_df = db.fetch_all_users()
+        if not users_df.empty:
+            st.dataframe(users_df, use_container_width=True)
+            u_del = st.selectbox("เลือกบัญชีที่ต้องการลบ:", users_df["username"].tolist())
+            if st.button("🗑️ ลบบัญชีผู้ใช้ที่เลือก"):
+                curr_user = st.session_state.get("auth", {}).get("username", "")
+                if u_del == curr_user:
+                    st.error("ไม่สามารถลบบัญชีตัวเองที่กำลังล็อกอินอยู่ได้")
+                else:
+                    db.delete_user_by_name(u_del)
+                    st.success(f"ลบบัญชี {u_del} เรียบร้อยแล้ว")
+                    st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 # ============================== MAIN ==============================
 def main():
     require_login()
     inject_custom_css()
     render_header_navbar()
 
-    # ตรวจสอบสิทธิ์ Admin จากระบบล็อกอิน
+    # ตรวจสอบสิทธิ์ Admin
     is_admin = st.session_state.get("auth", {}).get("role") == "admin"
+    auth_user = st.session_state.get("auth", {})
 
-    # จัดแท็บเมนูด้านบน (ถ้าเป็น Admin จะมีแท็บที่ 5 โผล่ขึ้นมาอัตโนมัติ)
-    tab_titles = [
-        "🔍 วิเคราะห์ความคิดเห็น (Analyze)",
-        "📊 สรุปผลสถิติ (Summary)",
-        "📑 ข้อมูลข้อร้องเรียน (Cloud Sync)",
+    # แถบเมนูด้านข้าง (Sidebar) ชัดเจน เรียบร้อย
+    st.sidebar.markdown(f"### 🏥 เมนูระบบงาน")
+    st.sidebar.markdown(f"**ผู้ใช้:** `{auth_user.get('username')}` | **สิทธิ์:** `{auth_user.get('role').upper()}`")
+    
+    sidebar_menu = [
+        "📊 หน้าหลัก (Dashboard & Analytics)",
+        "📑 ตารางข้อมูล Real-Time (Cloud Sync)",
         "📤 ส่งออกรายงาน PDF"
     ]
     if is_admin:
-        tab_titles.append("⚙️ การจัดการผู้ใช้งาน (Admin Only)")
+        sidebar_menu.append("⚙️ การจัดการผู้ใช้งาน (Admin Only)")
+        
+    choice = st.sidebar.radio("เลือกหน้าทำงาน:", sidebar_menu)
 
-    tabs = st.tabs(tab_titles)
-
-    # แท็บที่ 1: หน้าวิเคราะห์ความคิดเห็น
-    with tabs[0]:
+    # 1. หน้าแดชบอร์ดหลัก (มีแบนเนอร์ การ์ดคะแนน และแท็บวิเคราะห์แบบเดิมของคุณ)
+    if choice == "📊 หน้าหลัก (Dashboard & Analytics)":
         render_reference_banner()
-        banner("analyze")
-        page_analyze()
+
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🔍 วิเคราะห์ความคิดเห็น (Analyze)",
+            "📊 สรุปผลสถิติ (Summary)",
+            "⚙️ การตั้งค่าระบบ (Settings)",
+            "👤 ข้อมูลผู้ใช้ (Profile)"
+        ])
+
+        with tab1:
+            banner("analyze")
+            page_analyze()
+
+        with tab2:
+            banner("summary")
+            page_summary()
+
+        with tab3:
+            banner("settings")
+            page_settings()
+
+        with tab4:
+            banner("profile")
+            page_profile()
+
         render_department_realtime_cards()
         render_aspect_analytics_section()
         render_executive_summary_section()
 
-    # แท็บที่ 2: หน้าสรุปสถิติ
-    with tabs[1]:
-        banner("summary")
-        page_summary()
-
-    # แท็บที่ 3: ตารางข้อมูล Cloud Real-Time + ปุ่มลบเฉพาะ Admin
-    with tabs[2]:
+    # 2. หน้าตารางข้อมูล Cloud
+    elif choice == "📑 ตารางข้อมูล Real-Time (Cloud Sync)":
         page_cloud_data_and_management(is_admin)
 
-    # แท็บที่ 4: ส่งออกรายงาน PDF
-    with tabs[3]:
+    # 3. หน้าส่งออก PDF
+    elif choice == "📤 ส่งออกรายงาน PDF":
         page_export_pdf()
 
-    # แท็บที่ 5: หน้าจัดการผู้ใช้งาน (เข้าได้เฉพาะ Admin)
-    if is_admin:
-        with tabs[4]:
-            page_admin_users()
+    # 4. หน้าจัดการผู้ใช้ (Admin เท่านั้น)
+    elif choice == "⚙️ การจัดการผู้ใช้งาน (Admin Only)" and is_admin:
+        page_admin_users()
 
-    # Footer ด้านล่างสุดของเว็บ (เรียกครั้งเดียว)
     render_custom_footer()
 
 if __name__ == "__main__":
