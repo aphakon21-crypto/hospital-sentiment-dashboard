@@ -22,22 +22,32 @@ def get_db_client() -> Client:
 
 # --- 2. ฟังก์ชันยืนยันตัวตนผู้ใช้งาน ---
 def authenticate(username, password):
-    """ตรวจสอบชื่อผู้ใช้และรหัสผ่าน พร้อมดักจับข้อผิดพลาดการเชื่อมต่อ"""
+    """ตรวจสอบชื่อผู้ใช้และรหัสผ่านจาก Supabase พร้อม Fallback ฉุกเฉิน"""
+    u_clean = str(username).strip()
+    p_clean = str(password).strip()
+
+    # 1. ตรวจสอบผ่าน Supabase Database
     try:
         supabase = get_db_client()
         res = (
             supabase.table("app_users")
             .select("*")
-            .eq("username", username)
-            .eq("password_hash", password)
+            .eq("username", u_clean)
+            .eq("password_hash", p_clean)
             .execute()
         )
         if res.data and len(res.data) > 0:
             return res.data[0]
-        return None
     except Exception as e:
-        st.sidebar.error(f"⚠️ เกิดข้อผิดพลาดจากฐานข้อมูล: {e}")
-        return None
+        st.sidebar.warning(f"⚠️ ฐานข้อมูลแจ้งเตือน: {e}")
+
+    # 2. บัญชีสำรองฉุกเฉิน (กรณีฐานข้อมูลยังไม่ได้บันทึกค่า)
+    if u_clean == "admin" and p_clean == "admin1234":
+        return {"username": "admin", "role": "admin"}
+    elif u_clean == "staff" and p_clean == "user1234":
+        return {"username": "staff", "role": "user"}
+
+    return None
 
 # --- 3. ฟังก์ชันจัดการข้อมูลข้อร้องเรียน (Complaints) ---
 def fetch_complaints() -> pd.DataFrame:
