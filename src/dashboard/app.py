@@ -153,6 +153,7 @@ st.set_page_config(
     page_title="โรงพยาบาลสิริเวช จันทบุรี - Retail Sentiment Analytics",
     page_icon="🏥",
     layout="wide",
+    initial_sidebar_state="expanded"  # 👈 บังคับให้เปิด Sidebar ค้างไว้เสมอ
 )
 
 
@@ -286,7 +287,22 @@ def login_form():
     # 2. CSS ตกแต่งหน้า Login ตามภาพ Ref
     st.markdown("""
     <style>
-    [data-testid="collapsedControl"], header { display: none; }
+    /* ✅ ซ่อนเฉพาะ Header มาตรฐาน แต่คงปุ่มลูกศรเรียก Sidebar ไว้ ✅ */
+header[data-testid="stHeader"] { 
+    background: transparent !important; 
+}
+[data-testid="collapsedControl"] {
+    display: block !important;
+    visibility: visible !important;
+    z-index: 99999 !important;
+    color: #ffffff !important;
+}
+[data-testid="collapsedControl"] button {
+    background-color: #0f172a !important;
+    border: 1px solid rgba(56, 189, 248, 0.4) !important;
+    border-radius: 8px !important;
+    color: #38bdf8 !important;
+}
     
     .stApp {
         background: radial-gradient(circle at 10% 20%, #e8f4fc 0%, #f7fbfe 50%, #f0f7fd 100%) !important;
