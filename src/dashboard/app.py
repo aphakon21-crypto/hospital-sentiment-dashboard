@@ -2597,6 +2597,7 @@ def extract_complaint_from_pdf(pdf_file) -> dict:
         "แผนกที่เกี่ยวข้อง": "บริการทั่วไปของโรงพยาบาล",
         "ข้อความความคิดเห็นของลูกค้า": "-"
     }
+    
 @st.dialog("📄 เครื่องมือแปลงไฟล์ PDF ร้องเรียนเป็น CSV (Batch PDF Ingestion)")
 def open_pdf_batch_converter_dialog():
     st.markdown("""
@@ -2634,7 +2635,6 @@ def open_pdf_batch_converter_dialog():
         </style>
     """, unsafe_allow_html=True)
 
-    # แสดงผลรูปภาพโดยตรงผ่าน Streamlit image engine แทนการ encode base64 ก้อนใหญ่
     rabbit_img_path = Path("assets/rabbit-working.gif")
     if not rabbit_img_path.exists():
         rabbit_img_path = Path("assets/rabbit.png")
@@ -2662,25 +2662,27 @@ def open_pdf_batch_converter_dialog():
         """, unsafe_allow_html=True)
 
         if st.button("⚡ เริ่มสกัดข้อมูลและรวมไฟล์เป็น CSV", type="primary", use_container_width=True):
-        extracted_records = []
-        progress_bar = st.progress(0)
+            extracted_records = []
+            progress_bar = st.progress(0)
 
-        for i, pfile in enumerate(uploaded_pdfs):
-            record = extract_complaint_from_pdf(pfile)
-            extracted_records.append(record)
-            progress_bar.progress((i + 1) / len(uploaded_pdfs))
+            for i, pfile in enumerate(uploaded_pdfs):
+                record = extract_complaint_from_pdf(pfile)
+                extracted_records.append(record)
+                progress_bar.progress((i + 1) / len(uploaded_pdfs))
 
-        out_df = pd.DataFrame(extracted_records)
-        st.session_state["pdf_converted_df"] = out_df
+            out_df = pd.DataFrame(extracted_records)
+            st.session_state["pdf_converted_df"] = out_df
 
-        # --- [ส่วนที่เพิ่มใหม่] บันทึกข้อมูลขึ้น Cloud Database (Supabase) ---
-        try:
-            if extracted_records:
-                db.save_new_complaints(extracted_records)
-                st.success("🎉 แปลงข้อมูลและบันทึกลง Cloud สำเร็จ! (ทุกเครื่องเห็นข้อมูลอัปเดตทันที)")
-        except Exception as e:
-            st.warning(f"⚠️ สกัดข้อมูลสำเร็จ แต่ยังไม่สามารถซิงก์ขึ้น Cloud ได้: {e}")
-            st.success("🎉 แปลงและรวมข้อมูลสำเร็จเรียบร้อย!")
+            # บันทึกข้อมูลขึ้น Cloud Database (Supabase)
+            try:
+                if extracted_records and db:
+                    db.save_new_complaints(extracted_records)
+                    st.success("🎉 แปลงข้อมูลและบันทึกลง Cloud สำเร็จ! (ทุกเครื่องเห็นข้อมูลอัปเดตทันที)")
+                else:
+                    st.success("🎉 แปลงและรวมข้อมูลสำเร็จเรียบร้อย!")
+            except Exception as e:
+                st.warning(f"⚠️ สกัดข้อมูลสำเร็จ แต่ยังไม่สามารถซิงก์ขึ้น Cloud ได้: {e}")
+                st.success("🎉 แปลงและรวมข้อมูลสำเร็จเรียบร้อย!")
 
     if "pdf_converted_df" in st.session_state:
         df_res = st.session_state["pdf_converted_df"]
