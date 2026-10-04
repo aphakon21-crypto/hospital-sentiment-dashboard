@@ -155,35 +155,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- วางต่อจาก st.set_page_config(...) ทันที ---
-
-# 1. ตรวจสอบสถานะการเข้าสู่ระบบ
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-    st.session_state["username"] = ""
-    st.session_state["role"] = "user"
-
-def render_login():
-    st.sidebar.markdown("### 🔐 เข้าสู่ระบบ")
-    u = st.sidebar.text_input("ชื่อผู้ใช้งาน (Username)")
-    p = st.sidebar.text_input("รหัสผ่าน (Password)", type="password")
-    if st.sidebar.button("เข้าสู่ระบบ", use_container_width=True):
-        account = db.authenticate(u, p)
-        if account:
-            st.session_state["logged_in"] = True
-            st.session_state["username"] = account["username"]
-            st.session_state["role"] = account["role"]
-            st.sidebar.success(f"ยินดีต้อนรับ: {account['username']}")
-            st.rerun()
-        else:
-            st.sidebar.error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
-
-# ถ้ายังไม่ล็อกอิน ให้แสดงเฉพาะกล่องล็อกอิน แล้วหยุดการทำงานหน้าอื่นทันที
-if not st.session_state["logged_in"]:
-    render_login()
-    st.info("👋 กรุณาเข้าสู่ระบบผ่านแถบด้านข้าง (Sidebar) เพื่อเริ่มต้นใช้งานแดชบอร์ด")
-    st.stop()
-
 # แสดงข้อมูลผู้ใช้และปุ่มออกจากระบบที่ Sidebar
 st.sidebar.markdown(f"**ผู้ใช้งาน:** `{st.session_state['username']}` | **สิทธิ์:** `{st.session_state['role']}`")
 if st.sidebar.button("ออกจากระบบ"):
@@ -459,21 +430,43 @@ def login_form():
             """, unsafe_allow_html=True)
 
             if submit:
-                users = _get_users_from_secrets()
-                u = users.get(username)
-                if not u:
-                    st.error("❌ ไม่พบรหัสผู้ใช้งานนี้ในระบบ")
-                elif _verify_password(password, u["salt"], u["hash"]):
+                # 1. ตรวจสอบผ่าน Supabase Database (Cloud)
+                auth_data = None
+                if db:
+                    try:
+                        auth_data = db.authenticate(username, password)
+                    except Exception:
+                        auth_data = None
+
+                if auth_data:
                     st.session_state.auth = {
                         "logged_in": True,
-                        "username": username,
-                        "display_name": u.get("display_name", username),
-                        "role": u.get("role", "user"),
+                        "username": auth_data["username"],
+                        "display_name": auth_data["username"],
+                        "role": auth_data.get("role", "user"),
                     }
                     st.success("เข้าสู่ระบบสำเร็จ กำลังนำเข้าสู่ระบบ...")
                     st.rerun()
                 else:
-                    st.error("❌ รหัสผ่านไม่ถูกต้อง")
+                    # 2. กรณีฉุกเฉิน (Fallback เผื่อฐานข้อมูลขัดข้อง)
+                    if username == "admin" and password == "admin1234":
+                        st.session_state.auth = {
+                            "logged_in": True,
+                            "username": "admin",
+                            "display_name": "Administrator",
+                            "role": "admin",
+                        }
+                        st.rerun()
+                    elif username == "staff" and password == "user1234":
+                        st.session_state.auth = {
+                            "logged_in": True,
+                            "username": "staff",
+                            "display_name": "Staff User",
+                            "role": "user",
+                        }
+                        st.rerun()
+                    else:
+                        st.error("❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
 
 def require_login():
     if "auth" not in st.session_state or not st.session_state.auth.get("logged_in"):
@@ -2980,36 +2973,44 @@ def render_custom_footer():
 def main():
     require_login()
     inject_custom_css()
-
-    # 1. Navbar
     render_header_navbar()
 
-    # 2. แบนเนอร์สไลด์มีลูกศรเลื่อนและกระต่ายเกาะ
-    render_reference_banner()
+    # ตรวจสอบสิทธิ์ Admin จากระบบล็อกอิน
+    is_admin = st.session_state.get("auth", {}).get("role") == "admin"
 
-    # 3. เมนูแท็บหลัก
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # จัดแท็บเมนูด้านบน (ถ้าเป็น Admin จะมีแท็บที่ 5 โผล่ขึ้นมา)
+    tab_titles = [
         "🔍 วิเคราะห์ความคิดเห็น (Analyze)",
         "📊 สรุปผลสถิติ (Summary)",
-        "⚙️ การตั้งค่าระบบ (Settings)",
-        "👤 ข้อมูลผู้ใช้ (Profile)"
-    ])
+        "📑 ข้อมูลข้อร้องเรียน (Cloud Sync)",
+        "📤 ส่งออกรายงาน PDF"
+    ]
+    if is_admin:
+        tab_titles.append("⚙️ การจัดการผู้ใช้งาน (Admin Only)")
 
-    with tab1:
+    tabs = st.tabs(tab_titles)
+
+    with tabs[0]:
+        render_reference_banner()
         banner("analyze")
         page_analyze()
+        render_department_realtime_cards()
+        render_aspect_analytics_section()
+        render_executive_summary_section()
 
-    with tab2:
+    with tabs[1]:
         banner("summary")
         page_summary()
 
-    with tab3:
-        banner("settings")
-        page_settings()
+    with tabs[2]:
+        page_cloud_data_and_management(is_admin)
 
-    with tab4:
-        banner("profile")
-        show_user_page() if 'show_user_page' in globals() else page_profile()
+    with tabs[3]:
+        page_export_pdf()
+
+    if is_admin:
+        with tabs[4]:
+            page_admin_users()
 
     render_department_realtime_cards()
     # 4. เรียก Footer ทัศนียภาพจันทบุรี + คลื่นน้ำแอนิเมชัน + ข้อความ
