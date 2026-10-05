@@ -2262,77 +2262,86 @@ def render_department_realtime_cards():
 
     # ============================== EXECUTIVE AI RECOMMENDATIONS ==============================
 # ============================== EXECUTIVE AI RECOMMENDATIONS ==============================
+# ==================== EXECUTIVE AI RECOMMENDATIONS ====================
 import json
 import requests
+from pathlib import Path
 
+# 1. รวบรวมข้อร้องเรียนเชิงลบจาก LOG_PATH
+negative_feedbacks = []
+try:
+    log_file = globals().get("LOG_PATH", None)
+    if not log_file:
+        curr_dir = Path(__file__).resolve().parent
+        proj_root = curr_dir.parents[1] if len(curr_dir.parents) >= 2 else curr_dir.parent
+        for p in [curr_dir / "data" / "sentiment_logs.csv", proj_root / "data" / "sentiment_logs.csv", Path("data/sentiment_logs.csv")]:
+            if p.exists():
+                log_file = p
+                break
 
-    # 1. รวบรวมข้อร้องเรียนเชิงลบจาก LOG_PATH
-    negative_feedbacks = []
+    if log_file and Path(log_file).exists():
+        df_log = pd.read_csv(log_file, encoding="utf-8-sig")
+        if not df_log.empty and "label" in df_log.columns and "text" in df_log.columns:
+            dept_col = "category" if "category" in df_log.columns else "department"
+            neg_df = df_log[df_log["label"].astype(str).str.lower().str.contains("neg|ลบ|ไม่พอใจ|-1")]
+            for _, r in neg_df.iterrows():
+                d = str(r[dept_col]) if dept_col in df_log.columns else "ทั่วไป"
+                negative_feedbacks.append(f"[{d}] {r['text']}")
+except Exception:
+    pass
+
+# เพิ่มข้อมูลจาก Session History ในรอบปัจจุบัน (ถ้ามี)
+if "analysis_history" in st.session_state:
+    for item in st.session_state.analysis_history:
+        if "neg" in str(item.get("sentiment", "")).lower():
+            entry = f"[{item.get('department', 'ทั่วไป')}] {item.get('text', '')}"
+            if entry not in negative_feedbacks:
+                negative_feedbacks.append(entry)
+
+# คำนวณยอดเคสเชิงลบ
+total_neg = len(negative_feedbacks)
+
+# 2. คำนวณหายอดรวมข้อมูลทั้งหมด (เพื่อให้แสดงคู่กัน 449 | 330)
+df_src = pd.DataFrame()
+if "db" in globals() and db:
     try:
-        log_file = globals().get("LOG_PATH", None)
-        if not log_file:
-            curr_dir = Path(__file__).resolve().parent
-            proj_root = curr_dir.parents[1] if len(curr_dir.parents) >= 2 else curr_dir.parent
-            for p in [curr_dir / "data" / "sentiment_logs.csv", proj_root / "data" / "sentiment_logs.csv", Path("data/sentiment_logs.csv")]:
-                if p.exists():
-                    log_file = p
-                    break
-
-        if log_file and Path(log_file).exists():
-            df_log = pd.read_csv(log_file, encoding="utf-8-sig")
-            if not df_log.empty and "label" in df_log.columns and "text" in df_log.columns:
-                dept_col = "category" if "category" in df_log.columns else "department"
-                neg_df = df_log[df_log["label"].astype(str).str.lower().str.contains("neg|ลบ|ไม่พอใจ|-1")]
-                for _, r in neg_df.iterrows():
-                    d = str(r[dept_col]) if dept_col in df_log.columns else "ทั่วไป"
-                    negative_feedbacks.append(f"[{d}] {r['text']}")
+        df_src = db.fetch_complaints()
     except Exception:
-        pass
+        df_src = pd.DataFrame()
 
-    # เพิ่มข้อมูลจาก Session History ในรอบปัจจุบัน (ถ้ามี)
-    if "analysis_history" in st.session_state:
-        for item in st.session_state.analysis_history:
-            if "neg" in str(item.get("sentiment", "")).lower():
-                entry = f"[{item.get('department', 'ทั่วไป')}] {item.get('text', '')}"
-                if entry not in negative_feedbacks:
-                    negative_feedbacks.append(entry)
+if df_src.empty and "load_log" in globals():
+    df_src = load_log()
 
-    total_neg = len(negative_feedbacks)
+if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
+    if len(st.session_state["last_bulk_df"]) > len(df_src):
+        df_src = st.session_state["last_bulk_df"].copy()
 
-# 1. คำนวณหายอดรวมทั้งหมด (ดึงตรงจาก Cloud Database หรือ Log ป้องกันปัญหาต่างเครื่อง)
-    df_src = pd.DataFrame()
-    if "db" in globals() and db:
-        try:
-            df_src = db.fetch_complaints()
-        except Exception:
-            df_src = pd.DataFrame()
+total_all_records = len(df_src) if not df_src.empty else total_neg
 
-    if df_src.empty and "load_log" in globals():
-        df_src = load_log()
+# 3. ส่วนหัวและกล่องแสดงสถิติแบบใหม่ พร้อมปุ่มกดประมวลผล (แถวเดียวจบ ไม่ซ้ำ)
+st.markdown("---")
+st.markdown("""
+    <div style="margin-top: 10px; margin-bottom: 12px;">
+        <h3 style="color: #ffffff; margin-bottom: 4px;">🎯 ข้อเสนอแนะเชิงบริหารอัตโนมัติ (Executive AI Action Plan)</h3>
+        <p style="color: #94a3b8; font-size: 14px; margin: 0;">ประมวลผลข้อร้องเรียนเชิงลบทั้งหมดด้วย Gemini เพื่อแปลงเป็นแนวทางแก้ไขระดับปฏิบัติการ</p>
+    </div>
+""", unsafe_allow_html=True)
 
-    if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
-        if len(st.session_state["last_bulk_df"]) > len(df_src):
-            df_src = st.session_state["last_bulk_df"].copy()
-
-    total_all_records = len(df_src) if not df_src.empty else total_neg
-
-    # 2. จัดวางคอลัมน์: ฝั่งซ้ายเป็นกล่องสถิติแบบใหม่ ฝั่งขวาเป็นปุ่มกดสรุปเดิมของคุณ
-    col_info, col_btn = st.columns([3, 1.2])
-    with col_info:
-        st.markdown(f"""
-            <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 10px 16px; display: flex; align-items: center; min-height: 48px;">
-                <div style="font-size: 14px; color: #f8fafc; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
-                    <span>📌 <b>ข้อมูลในระบบทั้งหมด:</b> <span style="color: #38bdf8; font-weight: 700;">{total_all_records}</span> รายการ</span>
-                    <span style="color: rgba(255,255,255,0.2);">|</span>
-                    <span>🚨 <b>ข้อร้องเรียนเชิงลบที่ส่งวิเคราะห์:</b> <span style="color: #f87171; font-weight: 700;">{total_neg}</span> รายการ</span>
-                </div>
+col_info, col_btn = st.columns([3, 1.2])
+with col_info:
+    st.markdown(f"""
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 10px 16px; display: flex; align-items: center; min-height: 48px;">
+            <div style="font-size: 14px; color: #f8fafc; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+                <span>📌 <b>ข้อมูลในระบบทั้งหมด:</b> <span style="color: #38bdf8; font-weight: 700;">{total_all_records}</span> รายการ</span>
+                <span style="color: rgba(255,255,255,0.2);">|</span>
+                <span>🚨 <b>ข้อร้องเรียนเชิงลบที่ส่งวิเคราะห์:</b> <span style="color: #f87171; font-weight: 700;">{total_neg}</span> รายการ</span>
             </div>
-        """, unsafe_allow_html=True)
-        
-    with col_btn:
-        st.write("") # ปรับระดับให้ปุ่มขนานพอดีกับกล่องด้านซ้าย
-        btn_gen = st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", key="btn_gen_exec_plan", type="primary", use_container_width=True)
+        </div>
+    """, unsafe_allow_html=True)
 
+with col_btn:
+    st.write("")
+    btn_gen = st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", key="btn_gen_exec_plan_final", type="primary", use_container_width=True)
     # 2. เมื่อกดปุ่ม วิเคราะห์ผ่าน Gemini API
     if btn_gen:
         if total_neg == 0:
