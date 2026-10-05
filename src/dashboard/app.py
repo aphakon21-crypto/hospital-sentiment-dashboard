@@ -3317,7 +3317,7 @@ def main():
 
         render_department_realtime_cards()
         render_aspect_analytics_section()
-        
+        render_executive_summary_section()
 
     elif selected_menu == "📑 ข้อมูลข้อร้องเรียน (Cloud Sync)":
         page_cloud_data_and_management(is_admin)
