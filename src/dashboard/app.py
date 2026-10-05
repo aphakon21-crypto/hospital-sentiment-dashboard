@@ -2385,7 +2385,8 @@ def render_executive_summary_section():
                     sample_feedbacks = negative_feedbacks[-20:]
                     joined_feedback = "\n".join(sample_feedbacks)
 
-                    candidate_models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-latest"]
+                    # ลำดับโมเดลตามรุ่นที่ระบบเดิมของคุณรองรับและรันสำเร็จ
+                    candidate_models = ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
                     success_call = False
                     last_error_msg = ""
 
