@@ -2262,16 +2262,19 @@ def render_department_realtime_cards():
 
     # ============================== EXECUTIVE AI RECOMMENDATIONS ==============================
 # ============================== EXECUTIVE AI RECOMMENDATIONS ==============================
+import json
+import requests
+
 def render_executive_summary_section():
     st.markdown("---")
     st.markdown("""
         <div style="margin-top: 10px; margin-bottom: 15px;">
             <h3 style="color: #ffffff; margin-bottom: 4px;">🎯 ข้อเสนอแนะเชิงบริหารอัตโนมัติ (Executive AI Action Plan)</h3>
-            <p style="color: #94a3b8; font-size: 14px; margin: 0;">ประมวลผลข้อร้องเรียนเชิงลบทั้งหมดด้วย Gemini 3.5 Flash เพื่อแปลงเป็นแนวทางแก้ไขระดับปฏิบัติการ</p>
+            <p style="color: #94a3b8; font-size: 14px; margin: 0;">ประมวลผลข้อร้องเรียนเชิงลบทั้งหมดด้วย Gemini 1.5 Flash เพื่อแปลงเป็นแนวทางแก้ไขระดับปฏิบัติการ</p>
         </div>
     """, unsafe_allow_html=True)
 
-    # 1. ดึงข้อมูลล่าสุดจาก Supabase Cloud ก่อนเสมอ เพื่อให้ทุกเครื่องตรงกัน
+    # ดึงข้อมูลจาก Cloud / Local
     df = pd.DataFrame()
     if "db" in globals() and db:
         try:
@@ -2279,11 +2282,9 @@ def render_executive_summary_section():
         except Exception:
             df = pd.DataFrame()
 
-    # Fallback ไปยังไฟล์เครื่องหาก Cloud ยังไม่มีข้อมูล
     if df.empty and "load_log" in globals():
         df = load_log()
 
-    # ตรวจสอบเพิ่มเติมจาก Session ชั่วคราว (ถ้ามี)
     if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
         if len(st.session_state["last_bulk_df"]) > len(df):
             df = st.session_state["last_bulk_df"].copy()
@@ -2294,14 +2295,12 @@ def render_executive_summary_section():
 
     if not df.empty:
         sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df.columns), None)
-        feed_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "feedback", "text"] if c in df.columns), None)
-
         if sent_col:
             neg_mask = df[sent_col].astype(str).str.lower().str.contains("ลบ|neg|ปรับปรุง|-1")
             df_negative = df[neg_mask]
             neg_count = len(df_negative)
 
-    # 2. กล่องแสดงสถิติที่ชัดเจน (แสดงทั้งยอดรวมและยอดเชิงลบ ป้องกันการเข้าใจผิด)
+    # กล่องแสดงผลตัวเลข (แสดงรอบเดียว)
     st.markdown(f"""
         <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
             <div style="font-size: 15px; color: #f8fafc; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
@@ -2310,6 +2309,64 @@ def render_executive_summary_section():
             </div>
         </div>
     """, unsafe_allow_html=True)
+
+    # ปุ่มวิเคราะห์
+    if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True):
+        if neg_count == 0:
+            st.info("💡 ไม่พบข้อร้องเรียนเชิงลบในระบบขณะนี้")
+            return
+
+        with st.spinner(f"กำลังส่งข้อร้องเรียนเชิงลบ {neg_count} รายการ ให้ AI สรุปแนวทางแก้ไข..."):
+            api_key = st.secrets.get("GEMINI_API_KEY")
+            if not api_key:
+                st.error("⚠️ ไม่พบ GEMINI_API_KEY ใน Streamlit Secrets")
+                return
+
+            complaint_texts = []
+            for _, r in df_negative.iterrows():
+                dept = str(r.get("แผนกที่เกี่ยวข้อง", "ทั่วไป"))
+                text = str(r.get("ข้อความความคิดเห็นของลูกค้า", ""))
+                if text and text not in ["-", "nan", "None"]:
+                    complaint_texts.append(f"- [{dept}] {text}")
+
+            sample_payload = "\n".join(complaint_texts[:60])
+
+            prompt_text = f"""
+คุณคือที่ปรึกษาด้านการบริหารคุณภาพโรงพยาบาล โปรดวิเคราะห์ข้อร้องเรียนเชิงลบ {neg_count} รายการ ของโรงพยาบาลสิริเวช จันทบุรี ต่อไปนี้:
+{sample_payload}
+
+กรุณาสรุปผลเป็นโครงสร้างดังนี้:
+1. 🚨 **3 ปัญหาเร่งด่วนสูงสุด (Top Critical Issues)**
+2. 🏥 **แผนปรับปรุงระดับแผนก (Departmental Action Plan)**
+3. ⚡ **แนวทางแก้ไขทันที (Quick-Wins ภายใน 7-14 วัน)**
+4. 📈 **ข้อเสนอแนะเชิงกลยุทธ์ระยะยาว**
+ใช้ภาษาไทยที่เป็นทางการ เข้าใจง่าย และนำไปสั่งการต่อได้ทันที
+"""
+
+            # ยิงเรียก Gemini API ตรงผ่าน HTTPS ไม่ต้องลงแพ็กเกจเพิ่ม
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            payload = {
+                "contents": [{
+                    "parts": [{"text": prompt_text}]
+                }]
+            }
+
+            try:
+                res = requests.post(endpoint, json=payload, timeout=40)
+                if res.status_code == 200:
+                    res_json = res.json()
+                    ai_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                    st.session_state["executive_ai_plan"] = ai_text
+                else:
+                    st.error(f"⚠️ API Error ({res.status_code}): {res.text}")
+            except Exception as e:
+                st.error(f"⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อ AI: {e}")
+
+    # แสดงผลลัพธ์
+    if st.session_state.get("executive_ai_plan"):
+        st.markdown("<div class='premium-card' style='margin-top: 15px;'>", unsafe_allow_html=True)
+        st.markdown(st.session_state["executive_ai_plan"])
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # 3. ปุ่มประมวลผลข้อเสนอแนะเชิงบริหารด้วย Gemini
     if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True):
