@@ -2300,7 +2300,7 @@ def render_executive_summary_section():
             df_negative = df[neg_mask]
             neg_count = len(df_negative)
 
-    # แสดงยอดตัวเลข
+    # กล่องแสดงตัวเลขสรุป
     st.markdown(f"""
         <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
             <div style="font-size: 15px; color: #f8fafc; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
@@ -2310,18 +2310,19 @@ def render_executive_summary_section():
         </div>
     """, unsafe_allow_html=True)
 
-    # กำหนด key ชัดเจน ป้องกัน DuplicateElementId
-    if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True, key="btn_exec_ai_action_plan"):
+    # ใส่ key กำกับปุ่มแบบเจาะจง
+    if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True, key="btn_exec_ai_action_plan_unique"):
         if neg_count == 0:
             st.info("💡 ไม่พบข้อร้องเรียนเชิงลบในระบบขณะนี้")
             return
 
-        with st.spinner(f"กำลังประมวลผลข้อร้องเรียนเชิงลบ {neg_count} รายการ..."):
-            api_key = st.secrets.get("GEMINI_API_KEY")
-            if not api_key:
-                st.error("⚠️ ไม่พบ GEMINI_API_KEY ใน Streamlit Secrets")
-                return
+        # ตรวจสอบหา API Key จาก Streamlit Secrets
+        api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+        if not api_key:
+            st.error("⚠️️ ไม่พบคีย์ `GEMINI_API_KEY` ใน Streamlit Secrets (กรุณาไปที่ Manage App > Secrets)")
+            return
 
+        with st.spinner(f"กำลังส่งข้อร้องเรียนเชิงลบ {neg_count} รายการ ให้ AI ประมวลผล..."):
             complaint_texts = []
             for _, r in df_negative.iterrows():
                 dept = str(r.get("แผนกที่เกี่ยวข้อง", "ทั่วไป"))
@@ -2329,10 +2330,10 @@ def render_executive_summary_section():
                 if text and text not in ["-", "nan", "None"]:
                     complaint_texts.append(f"- [{dept}] {text}")
 
-            sample_payload = "\n".join(complaint_texts[:60])
+            sample_payload = "\n".join(complaint_texts[:50])
 
             prompt_text = f"""
-คุณคือที่ปรึกษาด้านการบริหารคุณภาพโรงพยาบาล โปรดวิเคราะห์ข้อร้องเรียนเชิงลบ {neg_count} รายการ ของโรงพยาบาลสิริเวช จันทบุรี ต่อไปนี้:
+คุณคือที่ปรึกษาด้านการบริหารคุณภาพโรงพยาบาลระดับสูง โปรดวิเคราะห์ข้อร้องเรียนเชิงลบ {neg_count} รายการ ของโรงพยาบาลสิริเวช จันทบุรี ต่อไปนี้:
 {sample_payload}
 
 กรุณาสรุปผลเป็นโครงสร้างดังนี้:
@@ -2340,10 +2341,9 @@ def render_executive_summary_section():
 2. 🏥 **แผนปรับปรุงระดับแผนก (Departmental Action Plan)**
 3. ⚡ **แนวทางแก้ไขทันที (Quick-Wins ภายใน 7-14 วัน)**
 4. 📈 **ข้อเสนอแนะเชิงกลยุทธ์ระยะยาว**
-ใช้ภาษาไทยที่เป็นทางการ ชัดเจน เข้าใจง่าย และสามารถนำไปสั่งการต่อได้ทันที
+ใช้ภาษาไทยที่เป็นทางการ เข้าใจง่าย ชัดเจน และนำไปสั่งการต่อได้ทันที
 """
 
-            # ใช้ Endpoint v1beta models/gemini-2.0-flash หรือ gemini-1.5-flash-latest
             headers = {"Content-Type": "application/json"}
             payload = {
                 "contents": [{
@@ -2351,140 +2351,38 @@ def render_executive_summary_section():
                 }]
             }
 
-            model_names = ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro"]
-            success = False
+            # ทดสอบส่งไปยัง Model Endpoint ล่าสุด
+            models_to_try = [
+                "gemini-1.5-flash-latest",
+                "gemini-1.5-flash",
+                "gemini-2.0-flash",
+                "gemini-pro"
+            ]
+            
+            ai_text = None
+            last_err = ""
 
-            for m in model_names:
+            for m in models_to_try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
                 try:
-                    res = requests.post(url, headers=headers, json=payload, timeout=45)
+                    res = requests.post(url, headers=headers, json=payload, timeout=40)
                     if res.status_code == 200:
                         res_json = res.json()
-                        st.session_state["executive_ai_plan"] = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                        success = True
+                        ai_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
                         break
-                except Exception:
-                    continue
+                    else:
+                        last_err = f"Model {m} Error ({res.status_code}): {res.text}"
+                except Exception as e:
+                    last_err = str(e)
 
-            if not success:
-                st.error("⚠️ ไม่สามารถเชื่อมต่อกับบริการ AI ได้ กรุณาตรวจสอบ API Key หรือโควตาการใช้งาน")
+            if ai_text:
+                st.session_state["executive_ai_plan"] = ai_text
+            else:
+                st.error(f"⚠️ การเชื่อมต่อล้มเหลว รายละเอียด: {last_err}")
 
+    # แสดงผลข้อเสนอแนะ
     if st.session_state.get("executive_ai_plan"):
         st.markdown("<div class='premium-card' style='margin-top: 15px;'>", unsafe_allow_html=True)
-        st.markdown(st.session_state["executive_ai_plan"])
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # ปุ่มวิเคราะห์
-    if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True):
-        if neg_count == 0:
-            st.info("💡 ไม่พบข้อร้องเรียนเชิงลบในระบบขณะนี้")
-            return
-
-        with st.spinner(f"กำลังส่งข้อร้องเรียนเชิงลบ {neg_count} รายการ ให้ AI สรุปแนวทางแก้ไข..."):
-            api_key = st.secrets.get("GEMINI_API_KEY")
-            if not api_key:
-                st.error("⚠️ ไม่พบ GEMINI_API_KEY ใน Streamlit Secrets")
-                return
-
-            complaint_texts = []
-            for _, r in df_negative.iterrows():
-                dept = str(r.get("แผนกที่เกี่ยวข้อง", "ทั่วไป"))
-                text = str(r.get("ข้อความความคิดเห็นของลูกค้า", ""))
-                if text and text not in ["-", "nan", "None"]:
-                    complaint_texts.append(f"- [{dept}] {text}")
-
-            sample_payload = "\n".join(complaint_texts[:60])
-
-            prompt_text = f"""
-คุณคือที่ปรึกษาด้านการบริหารคุณภาพโรงพยาบาล โปรดวิเคราะห์ข้อร้องเรียนเชิงลบ {neg_count} รายการ ของโรงพยาบาลสิริเวช จันทบุรี ต่อไปนี้:
-{sample_payload}
-
-กรุณาสรุปผลเป็นโครงสร้างดังนี้:
-1. 🚨 **3 ปัญหาเร่งด่วนสูงสุด (Top Critical Issues)**
-2. 🏥 **แผนปรับปรุงระดับแผนก (Departmental Action Plan)**
-3. ⚡ **แนวทางแก้ไขทันที (Quick-Wins ภายใน 7-14 วัน)**
-4. 📈 **ข้อเสนอแนะเชิงกลยุทธ์ระยะยาว**
-ใช้ภาษาไทยที่เป็นทางการ เข้าใจง่าย และนำไปสั่งการต่อได้ทันที
-"""
-
-            # ยิงเรียก Gemini API ตรงผ่าน HTTPS ไม่ต้องลงแพ็กเกจเพิ่ม
-            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-            payload = {
-                "contents": [{
-                    "parts": [{"text": prompt_text}]
-                }]
-            }
-
-            try:
-                res = requests.post(endpoint, json=payload, timeout=40)
-                if res.status_code == 200:
-                    res_json = res.json()
-                    ai_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                    st.session_state["executive_ai_plan"] = ai_text
-                else:
-                    st.error(f"⚠️ API Error ({res.status_code}): {res.text}")
-            except Exception as e:
-                st.error(f"⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อ AI: {e}")
-
-    # แสดงผลลัพธ์
-    if st.session_state.get("executive_ai_plan"):
-        st.markdown("<div class='premium-card' style='margin-top: 15px;'>", unsafe_allow_html=True)
-        st.markdown(st.session_state["executive_ai_plan"])
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # 3. ปุ่มประมวลผลข้อเสนอแนะเชิงบริหารด้วย Gemini
-    if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True):
-        if neg_count == 0:
-            st.info("💡 เยี่ยมมาก! ไม่พบข้อร้องเรียนเชิงลบในระบบขณะนี้ จึงไม่มีประเด็นที่ต้องปรับปรุงเร่งด่วน")
-            return
-
-        with st.spinner(f"กำลังรวบรวมข้อร้องเรียนเชิงลบ {neg_count} รายการ ให้ Gemini วิเคราะห์แนวทางแก้ไข..."):
-            try:
-                # รวบรวมข้อความเชิงลบส่งให้โมเดลประมวลผล
-                complaint_texts = []
-                for _, r in df_negative.iterrows():
-                    dept = str(r.get("แผนกที่เกี่ยวข้อง", "ทั่วไป"))
-                    text = str(r.get("ข้อความความคิดเห็นของลูกค้า", ""))
-                    if text and text not in ["-", "nan", "None"]:
-                        complaint_texts.append(f"- แผนก {dept}: {text}")
-
-                # ดึงตัวอย่างข้อความสำคัญ 50-80 รายการเพื่อไม่ให้ Prompt ยาวเกิน Token Limit
-                sample_payload = "\n".join(complaint_texts[:80])
-
-                prompt = f"""
-คุณคือผู้เชี่ยวชาญด้านการบริหารจัดการคุณภาพโรงพยาบาลระดับสูง (Hospital Quality & Executive Advisor)
-โปรดวิเคราะห์ข้อร้องเรียนเชิงลบของผู้รับบริการโรงพยาบาลสิริเวช จันทบุรี ต่อไปนี้ (ทั้งหมด {neg_count} รายการ) และจัดทำแผนปฏิบัติการเชิงบริหาร (Executive Action Plan):
-
-ข้อร้องเรียน:
-{sample_payload}
-
-กรุณาสรุปผลเป็นโครงสร้างดังนี้:
-1. 🚨 **3 ปัญหาเร่งด่วนสูงสุด (Top Critical Issues)**: ปัญหาที่กระทบต่อความปลอดภัยหรือความพึงพอใจอย่างรุนแรง
-2. 🏥 **แผนปรับปรุงระดับแผนก (Departmental Action Plan)**: ระบุแผนกที่พบปัญหาซ้ำซาก และวิธีแก้ไขที่วัดผลได้
-3. ⚡ **แนวทางแก้ไขทันทีแบบ Quick-Wins (ทำได้ภายใน 7-14 วัน)**
-4. 📈 **ข้อเสนอแนะเชิงกลยุทธ์ระยะยาว (Strategic Improvements)**
-
-ใช้ภาษาไทยที่เป็นทางการ เข้าใจง่าย ชัดเจน และนำไปสั่งการต่อได้ทันที
-"""
-                # เรียกใช้งาน Gemini API Client
-                api_key = st.secrets.get("GEMINI_API_KEY")
-                if not api_key:
-                    st.error("⚠️ ไม่พบ GEMINI_API_KEY ใน Streamlit Secrets")
-                    return
-
-                import google.generativeai as genai
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                response = model.generate_content(prompt)
-
-                st.session_state["executive_ai_plan"] = response.text
-
-            except Exception as e:
-                st.error(f"⚠️ เกิดข้อผิดพลาดในการประมวลผลของ Gemini: {e}")
-
-    # 4. แสดงผลลัพธ์แผนปฏิบัติการหากมีแคชผลลัพธ์อยู่แล้ว
-    if "executive_ai_plan" in st.session_state and st.session_state["executive_ai_plan"]:
-        st.markdown("<div class='premium-card' style='margin-top: 20px;'>", unsafe_allow_html=True)
         st.markdown(st.session_state["executive_ai_plan"])
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -3419,7 +3317,7 @@ def main():
 
         render_department_realtime_cards()
         render_aspect_analytics_section()
-        render_executive_summary_section()
+        
 
     elif selected_menu == "📑 ข้อมูลข้อร้องเรียน (Cloud Sync)":
         page_cloud_data_and_management(is_admin)
