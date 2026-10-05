@@ -2270,11 +2270,11 @@ def render_executive_summary_section():
     st.markdown("""
         <div style="margin-top: 10px; margin-bottom: 15px;">
             <h3 style="color: #ffffff; margin-bottom: 4px;">🎯 ข้อเสนอแนะเชิงบริหารอัตโนมัติ (Executive AI Action Plan)</h3>
-            <p style="color: #94a3b8; font-size: 14px; margin: 0;">ประมวลผลข้อร้องเรียนเชิงลบทั้งหมดด้วย Gemini 1.5 Flash เพื่อแปลงเป็นแนวทางแก้ไขระดับปฏิบัติการ</p>
+            <p style="color: #94a3b8; font-size: 14px; margin: 0;">ประมวลผลข้อร้องเรียนเชิงลบทั้งหมดด้วย AI เพื่อแปลงเป็นแนวทางแก้ไขระดับปฏิบัติการ</p>
         </div>
     """, unsafe_allow_html=True)
 
-    # ดึงข้อมูลจาก Cloud / Local
+    # 1. รวบรวมข้อมูล
     df = pd.DataFrame()
     if "db" in globals() and db:
         try:
@@ -2300,7 +2300,7 @@ def render_executive_summary_section():
             df_negative = df[neg_mask]
             neg_count = len(df_negative)
 
-    # กล่องแสดงผลตัวเลข (แสดงรอบเดียว)
+    # แสดงยอดตัวเลข
     st.markdown(f"""
         <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
             <div style="font-size: 15px; color: #f8fafc; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
@@ -2309,6 +2309,70 @@ def render_executive_summary_section():
             </div>
         </div>
     """, unsafe_allow_html=True)
+
+    # กำหนด key ชัดเจน ป้องกัน DuplicateElementId
+    if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True, key="btn_exec_ai_action_plan"):
+        if neg_count == 0:
+            st.info("💡 ไม่พบข้อร้องเรียนเชิงลบในระบบขณะนี้")
+            return
+
+        with st.spinner(f"กำลังประมวลผลข้อร้องเรียนเชิงลบ {neg_count} รายการ..."):
+            api_key = st.secrets.get("GEMINI_API_KEY")
+            if not api_key:
+                st.error("⚠️ ไม่พบ GEMINI_API_KEY ใน Streamlit Secrets")
+                return
+
+            complaint_texts = []
+            for _, r in df_negative.iterrows():
+                dept = str(r.get("แผนกที่เกี่ยวข้อง", "ทั่วไป"))
+                text = str(r.get("ข้อความความคิดเห็นของลูกค้า", ""))
+                if text and text not in ["-", "nan", "None"]:
+                    complaint_texts.append(f"- [{dept}] {text}")
+
+            sample_payload = "\n".join(complaint_texts[:60])
+
+            prompt_text = f"""
+คุณคือที่ปรึกษาด้านการบริหารคุณภาพโรงพยาบาล โปรดวิเคราะห์ข้อร้องเรียนเชิงลบ {neg_count} รายการ ของโรงพยาบาลสิริเวช จันทบุรี ต่อไปนี้:
+{sample_payload}
+
+กรุณาสรุปผลเป็นโครงสร้างดังนี้:
+1. 🚨 **3 ปัญหาเร่งด่วนสูงสุด (Top Critical Issues)**
+2. 🏥 **แผนปรับปรุงระดับแผนก (Departmental Action Plan)**
+3. ⚡ **แนวทางแก้ไขทันที (Quick-Wins ภายใน 7-14 วัน)**
+4. 📈 **ข้อเสนอแนะเชิงกลยุทธ์ระยะยาว**
+ใช้ภาษาไทยที่เป็นทางการ ชัดเจน เข้าใจง่าย และสามารถนำไปสั่งการต่อได้ทันที
+"""
+
+            # ใช้ Endpoint v1beta models/gemini-2.0-flash หรือ gemini-1.5-flash-latest
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{
+                    "parts": [{"text": prompt_text}]
+                }]
+            }
+
+            model_names = ["gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-1.5-pro"]
+            success = False
+
+            for m in model_names:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+                try:
+                    res = requests.post(url, headers=headers, json=payload, timeout=45)
+                    if res.status_code == 200:
+                        res_json = res.json()
+                        st.session_state["executive_ai_plan"] = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                        success = True
+                        break
+                except Exception:
+                    continue
+
+            if not success:
+                st.error("⚠️ ไม่สามารถเชื่อมต่อกับบริการ AI ได้ กรุณาตรวจสอบ API Key หรือโควตาการใช้งาน")
+
+    if st.session_state.get("executive_ai_plan"):
+        st.markdown("<div class='premium-card' style='margin-top: 15px;'>", unsafe_allow_html=True)
+        st.markdown(st.session_state["executive_ai_plan"])
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ปุ่มวิเคราะห์
     if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True):
