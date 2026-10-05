@@ -2419,10 +2419,38 @@ def render_executive_summary_section():
 
     total_neg = len(negative_feedbacks)
 
+# 1. คำนวณหายอดรวมทั้งหมด (ดึงตรงจาก Cloud Database หรือ Log ป้องกันปัญหาต่างเครื่อง)
+    df_src = pd.DataFrame()
+    if "db" in globals() and db:
+        try:
+            df_src = db.fetch_complaints()
+        except Exception:
+            df_src = pd.DataFrame()
+
+    if df_src.empty and "load_log" in globals():
+        df_src = load_log()
+
+    if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
+        if len(st.session_state["last_bulk_df"]) > len(df_src):
+            df_src = st.session_state["last_bulk_df"].copy()
+
+    total_all_records = len(df_src) if not df_src.empty else total_neg
+
+    # 2. จัดวางคอลัมน์: ฝั่งซ้ายเป็นกล่องสถิติแบบใหม่ ฝั่งขวาเป็นปุ่มกดสรุปเดิมของคุณ
     col_info, col_btn = st.columns([3, 1.2])
     with col_info:
-        st.info(f"📌 ตรวจพบข้อร้องเรียน/เชิงลบทั้งหมดในระบบขณะนี้: **{total_neg} รายการ**")
+        st.markdown(f"""
+            <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 10px 16px; display: flex; align-items: center; min-height: 48px;">
+                <div style="font-size: 14px; color: #f8fafc; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+                    <span>📌 <b>ข้อมูลในระบบทั้งหมด:</b> <span style="color: #38bdf8; font-weight: 700;">{total_all_records}</span> รายการ</span>
+                    <span style="color: rgba(255,255,255,0.2);">|</span>
+                    <span>🚨 <b>ข้อร้องเรียนเชิงลบที่ส่งวิเคราะห์:</b> <span style="color: #f87171; font-weight: 700;">{total_neg}</span> รายการ</span>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+        
     with col_btn:
+        st.write("") # ปรับระดับให้ปุ่มขนานพอดีกับกล่องด้านซ้าย
         btn_gen = st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", key="btn_gen_exec_plan", type="primary", use_container_width=True)
 
     # 2. เมื่อกดปุ่ม วิเคราะห์ผ่าน Gemini API
