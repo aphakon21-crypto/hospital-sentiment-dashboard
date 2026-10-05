@@ -2271,6 +2271,102 @@ def render_executive_summary_section():
         </div>
     """, unsafe_allow_html=True)
 
+    # 1. ดึงข้อมูลล่าสุดจาก Supabase Cloud ก่อนเสมอ เพื่อให้ทุกเครื่องตรงกัน
+    df = pd.DataFrame()
+    if "db" in globals() and db:
+        try:
+            df = db.fetch_complaints()
+        except Exception:
+            df = pd.DataFrame()
+
+    # Fallback ไปยังไฟล์เครื่องหาก Cloud ยังไม่มีข้อมูล
+    if df.empty and "load_log" in globals():
+        df = load_log()
+
+    # ตรวจสอบเพิ่มเติมจาก Session ชั่วคราว (ถ้ามี)
+    if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
+        if len(st.session_state["last_bulk_df"]) > len(df):
+            df = st.session_state["last_bulk_df"].copy()
+
+    total_count = len(df)
+    neg_count = 0
+    df_negative = pd.DataFrame()
+
+    if not df.empty:
+        sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df.columns), None)
+        feed_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "feedback", "text"] if c in df.columns), None)
+
+        if sent_col:
+            neg_mask = df[sent_col].astype(str).str.lower().str.contains("ลบ|neg|ปรับปรุง|-1")
+            df_negative = df[neg_mask]
+            neg_count = len(df_negative)
+
+    # 2. กล่องแสดงสถิติที่ชัดเจน (แสดงทั้งยอดรวมและยอดเชิงลบ ป้องกันการเข้าใจผิด)
+    st.markdown(f"""
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;">
+            <div style="font-size: 15px; color: #f8fafc; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+                <span>📌 <b>ข้อมูลในระบบทั้งหมด:</b> <span style="color: #38bdf8;">{total_count}</span> รายการ</span>
+                <span>🚨 <b>ข้อร้องเรียนเชิงลบที่ส่งวิเคราะห์:</b> <span style="color: #f87171;">{neg_count}</span> รายการ</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # 3. ปุ่มประมวลผลข้อเสนอแนะเชิงบริหารด้วย Gemini
+    if st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", type="primary", use_container_width=True):
+        if neg_count == 0:
+            st.info("💡 เยี่ยมมาก! ไม่พบข้อร้องเรียนเชิงลบในระบบขณะนี้ จึงไม่มีประเด็นที่ต้องปรับปรุงเร่งด่วน")
+            return
+
+        with st.spinner(f"กำลังรวบรวมข้อร้องเรียนเชิงลบ {neg_count} รายการ ให้ Gemini วิเคราะห์แนวทางแก้ไข..."):
+            try:
+                # รวบรวมข้อความเชิงลบส่งให้โมเดลประมวลผล
+                complaint_texts = []
+                for _, r in df_negative.iterrows():
+                    dept = str(r.get("แผนกที่เกี่ยวข้อง", "ทั่วไป"))
+                    text = str(r.get("ข้อความความคิดเห็นของลูกค้า", ""))
+                    if text and text not in ["-", "nan", "None"]:
+                        complaint_texts.append(f"- แผนก {dept}: {text}")
+
+                # ดึงตัวอย่างข้อความสำคัญ 50-80 รายการเพื่อไม่ให้ Prompt ยาวเกิน Token Limit
+                sample_payload = "\n".join(complaint_texts[:80])
+
+                prompt = f"""
+คุณคือผู้เชี่ยวชาญด้านการบริหารจัดการคุณภาพโรงพยาบาลระดับสูง (Hospital Quality & Executive Advisor)
+โปรดวิเคราะห์ข้อร้องเรียนเชิงลบของผู้รับบริการโรงพยาบาลสิริเวช จันทบุรี ต่อไปนี้ (ทั้งหมด {neg_count} รายการ) และจัดทำแผนปฏิบัติการเชิงบริหาร (Executive Action Plan):
+
+ข้อร้องเรียน:
+{sample_payload}
+
+กรุณาสรุปผลเป็นโครงสร้างดังนี้:
+1. 🚨 **3 ปัญหาเร่งด่วนสูงสุด (Top Critical Issues)**: ปัญหาที่กระทบต่อความปลอดภัยหรือความพึงพอใจอย่างรุนแรง
+2. 🏥 **แผนปรับปรุงระดับแผนก (Departmental Action Plan)**: ระบุแผนกที่พบปัญหาซ้ำซาก และวิธีแก้ไขที่วัดผลได้
+3. ⚡ **แนวทางแก้ไขทันทีแบบ Quick-Wins (ทำได้ภายใน 7-14 วัน)**
+4. 📈 **ข้อเสนอแนะเชิงกลยุทธ์ระยะยาว (Strategic Improvements)**
+
+ใช้ภาษาไทยที่เป็นทางการ เข้าใจง่าย ชัดเจน และนำไปสั่งการต่อได้ทันที
+"""
+                # เรียกใช้งาน Gemini API Client
+                api_key = st.secrets.get("GEMINI_API_KEY")
+                if not api_key:
+                    st.error("⚠️ ไม่พบ GEMINI_API_KEY ใน Streamlit Secrets")
+                    return
+
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                response = model.generate_content(prompt)
+
+                st.session_state["executive_ai_plan"] = response.text
+
+            except Exception as e:
+                st.error(f"⚠️ เกิดข้อผิดพลาดในการประมวลผลของ Gemini: {e}")
+
+    # 4. แสดงผลลัพธ์แผนปฏิบัติการหากมีแคชผลลัพธ์อยู่แล้ว
+    if "executive_ai_plan" in st.session_state and st.session_state["executive_ai_plan"]:
+        st.markdown("<div class='premium-card' style='margin-top: 20px;'>", unsafe_allow_html=True)
+        st.markdown(st.session_state["executive_ai_plan"])
+        st.markdown("</div>", unsafe_allow_html=True)
+
     # 1. รวบรวมข้อร้องเรียนเชิงลบจาก LOG_PATH
     negative_feedbacks = []
     try:
