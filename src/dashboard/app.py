@@ -2273,8 +2273,19 @@ import streamlit as st
 
 # ==================== EXECUTIVE AI RECOMMENDATIONS ====================
 def render_executive_summary_section():
-    # 1. รวบรวมข้อร้องเรียนเชิงลบจาก LOG_PATH
-    negative_feedbacks = []
+    # 1. รวมข้อมูลจากทุกแหล่งเข้าด้วยกัน (Cloud Supabase + Local Log + Session ที่เพิ่งอัปโหลด)
+    dataframes_to_combine = []
+
+    # 1.1 ดึงจาก Supabase Cloud (ถ้ามี)
+    if "db" in globals() and db:
+        try:
+            cloud_df = db.fetch_complaints()
+            if isinstance(cloud_df, pd.DataFrame) and not cloud_df.empty:
+                dataframes_to_combine.append(cloud_df)
+        except Exception:
+            pass
+
+    # 1.2 ดึงจาก Local CSV Log
     try:
         log_file = globals().get("LOG_PATH", None)
         if not log_file:
@@ -2284,47 +2295,55 @@ def render_executive_summary_section():
                 if p.exists():
                     log_file = p
                     break
-
         if log_file and Path(log_file).exists():
-            df_log = pd.read_csv(log_file, encoding="utf-8-sig")
-            if not df_log.empty and "label" in df_log.columns and "text" in df_log.columns:
-                dept_col = "category" if "category" in df_log.columns else "department"
-                neg_df = df_log[df_log["label"].astype(str).str.lower().str.contains("neg|ลบ|ไม่พอใจ|-1")]
-                for _, r in neg_df.iterrows():
-                    d = str(r[dept_col]) if dept_col in df_log.columns else "ทั่วไป"
-                    negative_feedbacks.append(f"[{d}] {r['text']}")
+            df_local = pd.read_csv(log_file, encoding="utf-8-sig")
+            if not df_local.empty:
+                dataframes_to_combine.append(df_local)
     except Exception:
         pass
 
-    # เพิ่มข้อมูลจาก Session History ในรอบปัจจุบัน (ถ้ามี)
+    # 1.3 ดึงข้อมูลที่เพิ่งอัปโหลดเข้ามาใน Session ปัจจุบัน (Bulk Upload)
+    if "last_bulk_df" in st.session_state and isinstance(st.session_state["last_bulk_df"], pd.DataFrame):
+        if not st.session_state["last_bulk_df"].empty:
+            dataframes_to_combine.append(st.session_state["last_bulk_df"])
+
+    # รวมตารางข้อมูลและลบแถวที่ซ้ำซ้อนออก (Merge & Deduplicate)
+    if dataframes_to_combine:
+        df_src = pd.concat(dataframes_to_combine, ignore_index=True)
+        # ตรวจสอบหาคอลัมน์ข้อความเพื่อลบแถวซ้ำ
+        text_id_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "text", "feedback", "comment"] if c in df_src.columns), None)
+        if text_id_col:
+            df_src = df_src.drop_duplicates(subset=[text_id_col], keep="last")
+    else:
+        df_src = pd.DataFrame()
+
+    # 2. คัดกรองและรวบรวมข้อร้องเรียนเชิงลบ
+    negative_feedbacks = []
+    sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df_src.columns), None)
+    feed_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "feedback", "text"] if c in df_src.columns), None)
+    dept_col = next((c for c in ["แผนกที่เกี่ยวข้อง", "category", "department"] if c in df_src.columns), None)
+
+    if not df_src.empty and sent_col and feed_col:
+        neg_mask = df_src[sent_col].astype(str).str.lower().str.contains("neg|ลบ|ไม่พอใจ|-1|ปรับปรุง")
+        df_neg_extracted = df_src[neg_mask]
+        for _, r in df_neg_extracted.iterrows():
+            d_val = str(r[dept_col]) if dept_col else "ทั่วไป"
+            t_val = str(r[feed_col]).strip()
+            if t_val and t_val not in ["-", "nan", "None"]:
+                negative_feedbacks.append(f"[{d_val}] {t_val}")
+
+    # ดึงเสริมจากประวัติการวิเคราะห์รายข้อความใน Session (Single Analysis History)
     if "analysis_history" in st.session_state:
         for item in st.session_state.analysis_history:
-            if "neg" in str(item.get("sentiment", "")).lower():
+            if "neg" in str(item.get("sentiment", "")).lower() or "ลบ" in str(item.get("sentiment", "")).lower():
                 entry = f"[{item.get('department', 'ทั่วไป')}] {item.get('text', '')}"
                 if entry not in negative_feedbacks:
                     negative_feedbacks.append(entry)
 
-    # คำนวณยอดเคสเชิงลบ
     total_neg = len(negative_feedbacks)
+    total_all_records = max(len(df_src), total_neg)
 
-    # 2. คำนวณหายอดรวมข้อมูลทั้งหมด (เพื่อให้แสดงคู่กัน 449 | 330)
-    df_src = pd.DataFrame()
-    if "db" in globals() and db:
-        try:
-            df_src = db.fetch_complaints()
-        except Exception:
-            df_src = pd.DataFrame()
-
-    if df_src.empty and "load_log" in globals():
-        df_src = load_log()
-
-    if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
-        if len(st.session_state["last_bulk_df"]) > len(df_src):
-            df_src = st.session_state["last_bulk_df"].copy()
-
-    total_all_records = len(df_src) if not df_src.empty else total_neg
-
-    # 3. ส่วนหัวและกล่องแสดงสถิติแบบใหม่ พร้อมปุ่มกดประมวลผล (แถวเดียวจบ ไม่ซ้ำ)
+    # 3. ส่วนหัวและกล่องแสดงสถิติแบบใหม่ (แสดงทั้งยอดรวมจริง และยอดเชิงลบ)
     st.markdown("---")
     st.markdown("""
         <div style="margin-top: 10px; margin-bottom: 12px;">
@@ -2349,13 +2368,12 @@ def render_executive_summary_section():
         st.write("")
         btn_gen = st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", key="btn_gen_exec_plan_final", type="primary", use_container_width=True)
 
-    # เมื่อกดปุ่ม วิเคราะห์ผ่าน Gemini API
+    # 4. เมื่อกดปุ่ม วิเคราะห์ผ่าน Gemini API
     if btn_gen:
         if total_neg == 0:
             st.success("🎉 ยอดเยี่ยม! ไม่พบข้อร้องเรียนเชิงลบในระบบ คุณภาพการบริการอยู่ในเกณฑ์มาตรฐานดีมาก")
         else:
-            with st.spinner("🤖 กำลังเชื่อมต่อ Gemini Flash เพื่อสังเคราะห์แผนปฏิบัติการ..."):
-                # ดึง API Key
+            with st.spinner(f"🤖 กำลังเชื่อมต่อ Gemini Flash เพื่อสังเคราะห์แผนปฏิบัติการจากข้อร้องเรียน {total_neg} รายการ..."):
                 api_key = None
                 try:
                     if "GEMINI_API_KEY" in st.secrets:
@@ -2380,12 +2398,11 @@ def render_executive_summary_section():
 
                 has_genai = globals().get("HAS_GENAI", False)
                 if not has_genai:
-                    st.error("⚠️ ไม่พบแพ็กเกจ google-genai หรือการตั้งค่า GenAI Client กรุณาตรวจสอบการตั้งค่า")
+                    st.error("⚠️ ไม่พบไลบรารี google-genai กรุณาตรวจสอบการติดตั้ง")
                 else:
-                    sample_feedbacks = negative_feedbacks[-20:]
+                    sample_feedbacks = negative_feedbacks[-40:]
                     joined_feedback = "\n".join(sample_feedbacks)
 
-                    # ลำดับโมเดลตามรุ่นที่ระบบเดิมของคุณรองรับและรันสำเร็จ
                     candidate_models = ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
                     success_call = False
                     last_error_msg = ""
@@ -2393,7 +2410,7 @@ def render_executive_summary_section():
                     client = genai.Client(api_key=api_key)
                     prompt = f"""
 คุณเป็นที่ปรึกษาอาวุโสด้านการบริหารจัดการโรงพยาบาลและการพัฒนาคุณภาพบริการ (Hospital Operations & Executive Consultant)
-ได้รับข้อมูลข้อร้องเรียนเชิงลบของผู้รับบริการดังต่อไปนี้:
+ได้รับข้อมูลข้อร้องเรียนเชิงลบของผู้รับบริการโรงพยาบาลสิริเวช จันทบุรี ดังต่อไปนี้:
 
 \"\"\"
 {joined_feedback}
@@ -3077,34 +3094,44 @@ def page_cloud_data_and_management(is_admin: bool):
 
 def page_export_pdf():
     st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
-    st.markdown("### 📤 ส่งออกรายงานผลสรุปเป็นไฟล์ PDF (Executive Summary)")
+    st.markdown("<h3 style='color:#38bdf8; font-weight:800;'>📤 ส่งออกรายงานผลสรุปเป็นไฟล์ PDF (Executive Summary)</h3>", unsafe_allow_html=True)
 
-    # 1. รวบรวมข้อมูลที่มีอยู่ทั้งหมด
-    df_all = pd.DataFrame()
-    if db:
+    # รวมข้อมูลทุกแหล่งเข้าด้วยกันเสมอ ป้องกันการถูกทับเหลือ 1 แถว
+    dfs = []
+    if "db" in globals() and db:
         try:
-            df_all = db.fetch_complaints()
+            c_df = db.fetch_complaints()
+            if isinstance(c_df, pd.DataFrame) and not c_df.empty:
+                dfs.append(c_df)
         except Exception:
-            df_all = pd.DataFrame()
+            pass
 
-    if df_all.empty:
-        df_all = load_log()
+    if "load_log" in globals():
+        l_df = load_log()
+        if isinstance(l_df, pd.DataFrame) and not l_df.empty:
+            dfs.append(l_df)
 
-    if "last_bulk_df" in st.session_state and not st.session_state["last_bulk_df"].empty:
-        b_df = st.session_state["last_bulk_df"]
-        if len(b_df) > len(df_all):
-            df_all = b_df.copy()
+    if "last_bulk_df" in st.session_state and isinstance(st.session_state["last_bulk_df"], pd.DataFrame):
+        if not st.session_state["last_bulk_df"].empty:
+            dfs.append(st.session_state["last_bulk_df"])
+
+    if dfs:
+        df_all = pd.concat(dfs, ignore_index=True)
+        text_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "text", "feedback"] if c in df_all.columns), None)
+        if text_col:
+            df_all = df_all.drop_duplicates(subset=[text_col], keep="last")
+    else:
+        df_all = pd.DataFrame()
 
     total = len(df_all)
-    pos = 0
-    neg = 0
+    pos, neg = 0, 0
 
     if not df_all.empty:
-        sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df_all.columns), None)
+        sent_col = next((c for c in ["ความรู้สึก", "label", "sentiment", "ผลภาพรวม (Overall)"] if c in df_all.columns), None)
         if sent_col:
-            val_series = df_all[sent_col].astype(str).str.lower()
-            pos = int(val_series.str.contains("บวก|pos|พอใจ|1").sum())
-            neg = int(val_series.str.contains("ลบ|neg|ปรับปรุง|-1").sum())
+            val_s = df_all[sent_col].astype(str).str.lower()
+            pos = int(val_s.str.contains("บวก|pos|พอใจ|1").sum())
+            neg = int(val_s.str.contains("ลบ|neg|ปรับปรุง|-1|ไม่พอใจ").sum())
 
     neu = max(0, total - (pos + neg))
     metrics = {"total": total, "pos": pos, "neu": neu, "neg": neg}
