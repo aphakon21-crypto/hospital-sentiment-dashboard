@@ -2273,19 +2273,14 @@ import streamlit as st
 
 # ==================== EXECUTIVE AI RECOMMENDATIONS ====================
 def render_executive_summary_section():
-    # 1. รวมข้อมูลจากทุกแหล่งเข้าด้วยกัน (Cloud Supabase + Local Log + Session ที่เพิ่งอัปโหลด)
-    dataframes_to_combine = []
-
-    # 1.1 ดึงจาก Supabase Cloud (ถ้ามี)
+    # 1. รวบรวมข้อมูล
+    dfs = []
     if "db" in globals() and db:
         try:
-            cloud_df = db.fetch_complaints()
-            if isinstance(cloud_df, pd.DataFrame) and not cloud_df.empty:
-                dataframes_to_combine.append(cloud_df)
-        except Exception:
-            pass
+            c_df = db.fetch_complaints()
+            if isinstance(c_df, pd.DataFrame) and not c_df.empty: dfs.append(c_df)
+        except Exception: pass
 
-    # 1.2 ดึงจาก Local CSV Log
     try:
         log_file = globals().get("LOG_PATH", None)
         if not log_file:
@@ -2296,43 +2291,48 @@ def render_executive_summary_section():
                     log_file = p
                     break
         if log_file and Path(log_file).exists():
-            df_local = pd.read_csv(log_file, encoding="utf-8-sig")
-            if not df_local.empty:
-                dataframes_to_combine.append(df_local)
-    except Exception:
-        pass
+            l_df = pd.read_csv(log_file, encoding="utf-8-sig")
+            if not l_df.empty: dfs.append(l_df)
+    except Exception: pass
 
-    # 1.3 ดึงข้อมูลที่เพิ่งอัปโหลดเข้ามาใน Session ปัจจุบัน (Bulk Upload)
     if "last_bulk_df" in st.session_state and isinstance(st.session_state["last_bulk_df"], pd.DataFrame):
-        if not st.session_state["last_bulk_df"].empty:
-            dataframes_to_combine.append(st.session_state["last_bulk_df"])
+        if not st.session_state["last_bulk_df"].empty: dfs.append(st.session_state["last_bulk_df"])
 
-    # รวมตารางข้อมูลและลบแถวที่ซ้ำซ้อนออก (Merge & Deduplicate)
-    if dataframes_to_combine:
-        df_src = pd.concat(dataframes_to_combine, ignore_index=True)
-        # ตรวจสอบหาคอลัมน์ข้อความเพื่อลบแถวซ้ำ
-        text_id_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "text", "feedback", "comment"] if c in df_src.columns), None)
-        if text_id_col:
-            df_src = df_src.drop_duplicates(subset=[text_id_col], keep="last")
+    # 1.5 จัดระเบียบชื่อคอลัมน์ให้ตรงกันก่อนรวมร่าง ป้องกันข้อมูลหาย
+    std_dfs = []
+    for d in dfs:
+        temp = pd.DataFrame()
+        t_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "text", "feedback", "comment"] if c in d.columns), None)
+        s_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in d.columns), None)
+        d_col = next((c for c in ["แผนกที่เกี่ยวข้อง", "category", "department", "แผนกที่ประเมิน"] if c in d.columns), None)
+        
+        temp["text"] = d[t_col] if t_col else ""
+        temp["sentiment"] = d[s_col] if s_col else ""
+        temp["department"] = d[d_col] if d_col else "ทั่วไป"
+        std_dfs.append(temp)
+
+    # รวมและตัดตัวซ้ำ
+    if std_dfs:
+        df_src = pd.concat(std_dfs, ignore_index=True)
+        df_src['text_clean'] = df_src['text'].astype(str).str.strip()
+        df_src = df_src[df_src['text_clean'] != ""]
+        df_src = df_src.drop_duplicates(subset=['text_clean'], keep="last")
     else:
-        df_src = pd.DataFrame()
+        df_src = pd.DataFrame(columns=["text", "sentiment", "department"])
+
+    total_all_records = len(df_src)
+    negative_feedbacks = []
 
     # 2. คัดกรองและรวบรวมข้อร้องเรียนเชิงลบ
-    negative_feedbacks = []
-    sent_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in df_src.columns), None)
-    feed_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "feedback", "text"] if c in df_src.columns), None)
-    dept_col = next((c for c in ["แผนกที่เกี่ยวข้อง", "category", "department"] if c in df_src.columns), None)
-
-    if not df_src.empty and sent_col and feed_col:
-        neg_mask = df_src[sent_col].astype(str).str.lower().str.contains("neg|ลบ|ไม่พอใจ|-1|ปรับปรุง")
-        df_neg_extracted = df_src[neg_mask]
-        for _, r in df_neg_extracted.iterrows():
-            d_val = str(r[dept_col]) if dept_col else "ทั่วไป"
-            t_val = str(r[feed_col]).strip()
+    if not df_src.empty:
+        neg_mask = df_src["sentiment"].astype(str).str.lower().str.contains("neg|ลบ|ไม่พอใจ|-1|ปรับปรุง")
+        df_neg = df_src[neg_mask]
+        for _, r in df_neg.iterrows():
+            d_val = str(r["department"])
+            t_val = str(r["text"]).strip()
             if t_val and t_val not in ["-", "nan", "None"]:
                 negative_feedbacks.append(f"[{d_val}] {t_val}")
 
-    # ดึงเสริมจากประวัติการวิเคราะห์รายข้อความใน Session (Single Analysis History)
     if "analysis_history" in st.session_state:
         for item in st.session_state.analysis_history:
             if "neg" in str(item.get("sentiment", "")).lower() or "ลบ" in str(item.get("sentiment", "")).lower():
@@ -2341,9 +2341,9 @@ def render_executive_summary_section():
                     negative_feedbacks.append(entry)
 
     total_neg = len(negative_feedbacks)
-    total_all_records = max(len(df_src), total_neg)
+    total_all_records = max(total_all_records, total_neg)
 
-    # 3. ส่วนหัวและกล่องแสดงสถิติแบบใหม่ (แสดงทั้งยอดรวมจริง และยอดเชิงลบ)
+    # 3. แสดงผลกล่องสถิติ
     st.markdown("---")
     st.markdown("""
         <div style="margin-top: 10px; margin-bottom: 12px;">
@@ -2368,22 +2368,17 @@ def render_executive_summary_section():
         st.write("")
         btn_gen = st.button("✨ สรุปข้อเสนอแนะเชิงบริหาร", key="btn_gen_exec_plan_final", type="primary", use_container_width=True)
 
-    # 4. เมื่อกดปุ่ม วิเคราะห์ผ่าน Gemini API
+    # 4. เรียกใช้งาน AI เดิม
     if btn_gen:
         if total_neg == 0:
             st.success("🎉 ยอดเยี่ยม! ไม่พบข้อร้องเรียนเชิงลบในระบบ คุณภาพการบริการอยู่ในเกณฑ์มาตรฐานดีมาก")
         else:
-            with st.spinner(f"🤖 กำลังเชื่อมต่อ Gemini Flash เพื่อสังเคราะห์แผนปฏิบัติการจากข้อร้องเรียน {total_neg} รายการ..."):
+            with st.spinner("🤖 กำลังเชื่อมต่อ Gemini Flash เพื่อสังเคราะห์แผนปฏิบัติการ..."):
                 api_key = None
                 try:
-                    if "GEMINI_API_KEY" in st.secrets:
-                        api_key = st.secrets["GEMINI_API_KEY"]
-                except Exception:
-                    pass
-
-                if not api_key:
-                    api_key = os.getenv("GEMINI_API_KEY", "")
-
+                    if "GEMINI_API_KEY" in st.secrets: api_key = st.secrets["GEMINI_API_KEY"]
+                except Exception: pass
+                if not api_key: api_key = os.getenv("GEMINI_API_KEY", "")
                 if not api_key:
                     for secret_path in [Path(".streamlit/secrets.toml"), Path("../.streamlit/secrets.toml"), Path("../../.streamlit/secrets.toml")]:
                         if secret_path.exists():
@@ -2391,44 +2386,36 @@ def render_executive_summary_section():
                                 import toml
                                 data = toml.load(secret_path)
                                 api_key = data.get("GEMINI_API_KEY", None)
-                                if api_key:
-                                    break
-                            except Exception:
-                                pass
+                                if api_key: break
+                            except Exception: pass
 
                 has_genai = globals().get("HAS_GENAI", False)
                 if not has_genai:
-                    st.error("⚠️ ไม่พบไลบรารี google-genai กรุณาตรวจสอบการติดตั้ง")
+                    st.error("⚠️ ไม่พบแพ็กเกจ google-genai หรือการตั้งค่า GenAI Client กรุณาตรวจสอบการตั้งค่า")
                 else:
                     sample_feedbacks = negative_feedbacks[-40:]
                     joined_feedback = "\n".join(sample_feedbacks)
-
                     candidate_models = ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
                     success_call = False
                     last_error_msg = ""
-
                     client = genai.Client(api_key=api_key)
+                    
                     prompt = f"""
 คุณเป็นที่ปรึกษาอาวุโสด้านการบริหารจัดการโรงพยาบาลและการพัฒนาคุณภาพบริการ (Hospital Operations & Executive Consultant)
-ได้รับข้อมูลข้อร้องเรียนเชิงลบของผู้รับบริการโรงพยาบาลสิริเวช จันทบุรี ดังต่อไปนี้:
-
+ได้รับข้อมูลข้อร้องเรียนเชิงลบของผู้รับบริการดังต่อไปนี้:
 \"\"\"
 {joined_feedback}
 \"\"\"
-
 จงวิเคราะห์และสรุปแนวทางแก้ไขเชิงปฏิบัติการ (Action Plan) สำหรับคณะผู้บริหาร โดยเขียนให้กระชับ ชัดเจน ตรงประเด็น 3-5 ข้อ ครอบคลุม:
 1. ปัญหาเร่งด่วนที่สุดที่ต้องแก้ไขทันทีในสัปดาห์นี้ (Critical Urgent Action)
 2. แผนกที่ต้องการจัดสรรกำลังคน หรือปรับปรุง Flow คิว/การสื่อสารอย่างเร่งด่วน
 3. มาตรการเชิงป้องกันระยะยาวด้านสถานที่หรือบุคลากร
-
 ใช้ภาษาไทยทางการ มีเครื่องหมาย Bullet point หัวข้อย่อยชัดเจน
 """
-
                     for m_name in candidate_models:
                         try:
                             resp = client.models.generate_content(
-                                model=m_name,
-                                contents=prompt,
+                                model=m_name, contents=prompt,
                                 config=types.GenerateContentConfig(temperature=0.2)
                             )
                             st.session_state["exec_action_plan_text"] = resp.text
@@ -2442,19 +2429,16 @@ def render_executive_summary_section():
                     if not success_call:
                         st.error(f"⚠️ เกิดข้อผิดพลาดจาก Gemini API: {last_error_msg}")
 
-    # แสดงผลการ์ดสรุปแผนปฏิบัติการ
     if "exec_action_plan_text" in st.session_state:
         plan_content = st.session_state["exec_action_plan_text"]
         source_label = st.session_state.get("exec_source_type", "Gemini")
-
         header_html = (
             f'<div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.4); '
             f'border-left: 6px solid #38bdf8; border-radius: 14px; padding: 22px; margin-top: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">'
             f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">'
             f'<span style="color: #38bdf8; font-weight: 800; font-size: 16px;">📑 รายงานสรุปแผนปฏิบัติการสำหรับฝ่ายบริหาร (AI Action Plan)</span>'
             f'<span style="color: #94a3b8; font-size: 12px;">Generated by {source_label}</span>'
-            f'</div>'
-            f'</div>'
+            f'</div></div>'
         )
         st.markdown(header_html, unsafe_allow_html=True)
         st.markdown(plan_content)
@@ -3096,42 +3080,51 @@ def page_export_pdf():
     st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
     st.markdown("<h3 style='color:#38bdf8; font-weight:800;'>📤 ส่งออกรายงานผลสรุปเป็นไฟล์ PDF (Executive Summary)</h3>", unsafe_allow_html=True)
 
-    # รวมข้อมูลทุกแหล่งเข้าด้วยกันเสมอ ป้องกันการถูกทับเหลือ 1 แถว
     dfs = []
     if "db" in globals() and db:
         try:
             c_df = db.fetch_complaints()
-            if isinstance(c_df, pd.DataFrame) and not c_df.empty:
-                dfs.append(c_df)
-        except Exception:
-            pass
+            if isinstance(c_df, pd.DataFrame) and not c_df.empty: dfs.append(c_df)
+        except Exception: pass
 
     if "load_log" in globals():
-        l_df = load_log()
-        if isinstance(l_df, pd.DataFrame) and not l_df.empty:
-            dfs.append(l_df)
+        try:
+            l_df = load_log()
+            if isinstance(l_df, pd.DataFrame) and not l_df.empty: dfs.append(l_df)
+        except Exception: pass
 
     if "last_bulk_df" in st.session_state and isinstance(st.session_state["last_bulk_df"], pd.DataFrame):
-        if not st.session_state["last_bulk_df"].empty:
-            dfs.append(st.session_state["last_bulk_df"])
+        if not st.session_state["last_bulk_df"].empty: dfs.append(st.session_state["last_bulk_df"])
 
-    if dfs:
-        df_all = pd.concat(dfs, ignore_index=True)
-        text_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "text", "feedback"] if c in df_all.columns), None)
-        if text_col:
-            df_all = df_all.drop_duplicates(subset=[text_col], keep="last")
+    std_dfs = []
+    for d in dfs:
+        temp = pd.DataFrame()
+        t_col = next((c for c in ["ข้อความความคิดเห็นของลูกค้า", "text", "feedback", "comment"] if c in d.columns), None)
+        s_col = next((c for c in ["ความรู้สึก", "sentiment", "label", "ผลภาพรวม (Overall)"] if c in d.columns), None)
+        d_col = next((c for c in ["แผนกที่เกี่ยวข้อง", "category", "department", "แผนกที่ประเมิน"] if c in d.columns), None)
+        date_col = next((c for c in ["วันที่", "date", "timestamp"] if c in d.columns), None)
+
+        temp["text"] = d[t_col] if t_col else ""
+        temp["sentiment"] = d[s_col] if s_col else ""
+        temp["department"] = d[d_col] if d_col else "ทั่วไป"
+        temp["date"] = d[date_col] if date_col else "-"
+        std_dfs.append(temp)
+
+    if std_dfs:
+        df_all = pd.concat(std_dfs, ignore_index=True)
+        df_all['text_clean'] = df_all['text'].astype(str).str.strip()
+        df_all = df_all[df_all['text_clean'] != ""]
+        df_all = df_all.drop_duplicates(subset=['text_clean'], keep="last")
     else:
-        df_all = pd.DataFrame()
+        df_all = pd.DataFrame(columns=["text", "sentiment", "department", "date"])
 
     total = len(df_all)
     pos, neg = 0, 0
 
     if not df_all.empty:
-        sent_col = next((c for c in ["ความรู้สึก", "label", "sentiment", "ผลภาพรวม (Overall)"] if c in df_all.columns), None)
-        if sent_col:
-            val_s = df_all[sent_col].astype(str).str.lower()
-            pos = int(val_s.str.contains("บวก|pos|พอใจ|1").sum())
-            neg = int(val_s.str.contains("ลบ|neg|ปรับปรุง|-1|ไม่พอใจ").sum())
+        val_s = df_all["sentiment"].astype(str).str.lower()
+        pos = int(val_s.str.contains("บวก|pos|พอใจ|1").sum())
+        neg = int(val_s.str.contains("ลบ|neg|ปรับปรุง|-1|ไม่พอใจ").sum())
 
     neu = max(0, total - (pos + neg))
     metrics = {"total": total, "pos": pos, "neu": neu, "neg": neg}
